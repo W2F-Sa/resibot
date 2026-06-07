@@ -11,7 +11,14 @@ class OrderStates(StatesGroup):
     entering_country = State()   # ورود دستی کد کشور
     choosing_state = State()     # انتخاب استان از لیست
     choosing_city = State()      # انتخاب شهر از لیست
+    choosing_life = State()      # انتخاب زمان تعویض IP
+    entering_life = State()      # ورود دستی زمان تعویض IP
     entering_volume = State()
+
+
+class ConfigStates(StatesGroup):
+    """ویرایش مقادیر یک کانفیگ موجود."""
+    entering_life = State()
 
 
 class ChangeLocationStates(StatesGroup):

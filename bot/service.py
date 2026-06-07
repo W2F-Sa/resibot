@@ -222,12 +222,15 @@ class Service:
         owner_tg_id: int,
         location: ProxyLocation,
         volume_gb: int,
+        life: Optional[int] = None,
     ) -> ProvisionResult:
         min_gb = self.min_volume_gb
         if volume_gb < min_gb:
             raise ValueError(f"حداقل حجم خرید {min_gb} گیگابایت است.")
         if not self.server_ip:
             raise ValueError("IP/دامنه‌ی سرور تنظیم نشده است. ادمین باید آن را ست کند.")
+
+        life_val = self._clamp_life(self.cfg.smartproxy_life if life is None else life)
 
         ps = await self._panel_settings()
         spec = await self._build_inbound_spec()
@@ -262,7 +265,7 @@ class Service:
             area=location.area,
             state=location.state,
             city=location.city,
-            life=self.cfg.smartproxy_life,
+            life=life_val,
             session=session,
         )
         outbound_tag = f"out-{inbound_id}"
@@ -324,6 +327,17 @@ class Service:
                 return int(ib.get("id", 0))
         return 0
 
+    @staticmethod
+    def _clamp_life(life: int) -> int:
+        """life معتبر: 0 (بدون تعویض خودکار) یا 1..1440 دقیقه."""
+        try:
+            life = int(life)
+        except (TypeError, ValueError):
+            return 0
+        if life <= 0:
+            return 0
+        return min(1440, life)
+
     # ------------------------------------------------------------------ #
     #  تغییر IP و لوکیشن
     # ------------------------------------------------------------------ #
@@ -336,7 +350,7 @@ class Service:
             area=row["area"],
             state=row["state"],
             city=row["city"],
-            life=self.cfg.smartproxy_life,
+            life=self._clamp_life(row["life"]),
             session=new_session,
         )
         username = self._smartproxy_username(loc)
@@ -367,7 +381,7 @@ class Service:
             area=area,
             state=state,
             city=city,
-            life=self.cfg.smartproxy_life,
+            life=self._clamp_life(row["life"]),
             session=session,
         )
         username = self._smartproxy_username(loc)
@@ -376,6 +390,27 @@ class Service:
             config_id, area=loc.area, state=loc.state, city=loc.city, session=session
         )
         return loc
+
+    async def set_life(self, config_id: int, minutes: int) -> int:
+        """زمان تعویض خودکار IP (دقیقه) را برای یک کانفیگ تنظیم می‌کند.
+
+        0 یعنی بدون تعویض خودکار (IP تا تغییر دستی ثابت می‌ماند).
+        """
+        row = self.db.get_config(config_id)
+        if not row:
+            raise ValueError("کانفیگ پیدا نشد.")
+        life_val = self._clamp_life(minutes)
+        loc = ProxyLocation(
+            area=row["area"],
+            state=row["state"],
+            city=row["city"],
+            life=life_val,
+            session=row["session"],
+        )
+        username = self._smartproxy_username(loc)
+        await self._apply_outbound(row["inbound_tag"], row["outbound_tag"], username)
+        self.db.update_config_life(config_id, life_val)
+        return life_val
 
     # ------------------------------------------------------------------ #
     #  حذف کانفیگ
@@ -412,7 +447,7 @@ class Service:
             raise ValueError("کانفیگ پیدا نشد.")
         loc = ProxyLocation(
             area=row["area"], state=row["state"], city=row["city"],
-            life=self.cfg.smartproxy_life, session=row["session"],
+            life=self._clamp_life(row["life"]), session=row["session"],
         )
         username = self._smartproxy_username(loc)
         outbound = xc.build_smartproxy_outbound(

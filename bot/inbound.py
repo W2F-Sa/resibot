@@ -62,13 +62,9 @@ def build_stream_settings(spec: InboundSpec) -> dict[str, Any]:
     xhttp_settings: dict[str, Any] = {
         "path": spec.path,
         "host": spec.host,
-        "headers": {},
-        "scMaxBufferedPosts": 30,
-        "scMaxEachPostBytes": str(spec.sc_max_each_post_bytes),
-        "scStreamUpServerSecs": "20-80",
-        "noSSEHeader": False,
-        "xPaddingBytes": "100-1000",
         "mode": "auto",
+        "scMaxEachPostBytes": str(spec.sc_max_each_post_bytes),
+        "xPaddingBytes": "100-1000",
     }
 
     return {

@@ -46,12 +46,20 @@ def location_str(row: sqlite3.Row) -> str:
     return " | ".join(parts) if parts else "تصادفی"
 
 
+def life_str(minutes) -> str:
+    m = int(minutes or 0)
+    if m <= 0:
+        return "بدون تعویض خودکار"
+    return f"هر {m} دقیقه"
+
+
 def config_summary(row: sqlite3.Row, *, show_owner: bool = False) -> str:
     lines = [
         f"🆔 کانفیگ <code>#{row['id']}</code>",
         f"📦 حجم: <b>{row['volume_gb']} GB</b>",
         f"⏳ انقضا: {fmt_expiry(row['expiry_ms'])} ({days_left(row['expiry_ms'])} روز)",
         f"🌍 لوکیشن: {escape(location_str(row))}",
+        f"⏱ تعویض IP: {life_str(row['life'])}",
         f"🔌 پورت: <code>{row['port']}</code>",
     ]
     if show_owner:
@@ -68,6 +76,7 @@ def provision_message(result, sub_link: str = "") -> str:
         "",
         f"📦 حجم: <b>{result.volume_gb} GB</b>",
         f"💵 مبلغ: <b>${result.price:g}</b>",
+        f"⏱ تعویض IP: {life_str(result.location.life)}",
         f"⏳ انقضا: {fmt_expiry(result.expiry_ms)}",
         f"🆔 شناسه کانفیگ: <code>#{result.config_id}</code>",
         "",

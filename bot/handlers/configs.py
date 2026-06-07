@@ -18,11 +18,12 @@ from ..keyboards import (
     confirm_delete,
     country_keyboard,
     country_results_keyboard,
+    life_keyboard,
     options_keyboard,
 )
 from ..proxy import normalize_code, validate_code
 from ..service import Service
-from ..states import ChangeLocationStates
+from ..states import ChangeLocationStates, ConfigStates
 from ..utils import config_summary, fmt_bytes, fmt_expiry
 
 logger = logging.getLogger("resibot.configs")
@@ -328,6 +329,70 @@ async def city_set(call: CallbackQuery, service: Service, db: Database, cfg: Set
         f"✅ شهر تغییر کرد به <b>{locations.prettify(loc.city) or 'تصادفی'}</b>.\n"
         f"🔑 session: <code>{loc.session}</code>"
     )
+
+
+# ====================================================================== #
+#  تغییر زمان تعویض خودکار IP (life) برای یک کانفیگ
+# ====================================================================== #
+@router.callback_query(F.data.startswith("cfg_life:"))
+async def life_pick(call: CallbackQuery, db: Database, cfg: Settings) -> None:
+    config_id = int(call.data.split(":", 1)[1])
+    row = _access_or_none(config_id, call.from_user.id, cfg, db)
+    if not row:
+        await call.answer("دسترسی ندارید یا کانفیگ یافت نشد.", show_alert=True)
+        return
+    current = int(row["life"] or 0)
+    cur_txt = "بدون تعویض خودکار" if current <= 0 else f"هر {current} دقیقه"
+    await call.answer()
+    await call.message.answer(
+        f"⏱ زمان تعویض خودکار IP (فعلی: <b>{cur_txt}</b>) را انتخاب کنید:",
+        reply_markup=life_keyboard(f"sl:{config_id}"),
+    )
+
+
+@router.callback_query(F.data.startswith("sl:"))
+async def life_set(call: CallbackQuery, state: FSMContext, service: Service, db: Database, cfg: Settings) -> None:
+    _, sid, value = call.data.split(":", 2)
+    config_id = int(sid)
+    row = _access_or_none(config_id, call.from_user.id, cfg, db)
+    if not row:
+        await call.answer("دسترسی ندارید.", show_alert=True)
+        return
+    if value == "__custom__":
+        await state.set_state(ConfigStates.entering_life)
+        await state.update_data(config_id=config_id)
+        await call.answer()
+        await call.message.answer("عدد دلخواه را بفرستید (دقیقه، بین ۱ تا ۱۴۴۰):")
+        return
+    await call.answer("در حال اعمال...")
+    msg = await call.message.answer("⏳ در حال تنظیم زمان تعویض IP...")
+    try:
+        life = await service.set_life(config_id, int(value))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("set_life failed")
+        await msg.edit_text(f"❌ خطا:\n<code>{exc}</code>")
+        return
+    txt = "بدون تعویض خودکار (تا تغییر دستی ثابت می‌ماند)" if life <= 0 else f"هر <b>{life}</b> دقیقه"
+    await msg.edit_text(f"✅ زمان تعویض IP تنظیم شد: {txt}")
+
+
+@router.message(ConfigStates.entering_life)
+async def life_custom(message: Message, state: FSMContext, service: Service) -> None:
+    text = (message.text or "").strip()
+    if not text.isdigit() or not (1 <= int(text) <= 1440):
+        await message.answer("⛔️ یک عدد بین ۱ تا ۱۴۴۰ بفرستید:")
+        return
+    data = await state.get_data()
+    await state.clear()
+    config_id = int(data.get("config_id", 0))
+    msg = await message.answer("⏳ در حال تنظیم زمان تعویض IP...")
+    try:
+        life = await service.set_life(config_id, int(text))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("set_life custom failed")
+        await msg.edit_text(f"❌ خطا:\n<code>{exc}</code>")
+        return
+    await msg.edit_text(f"✅ زمان تعویض IP تنظیم شد: هر <b>{life}</b> دقیقه")
 
 
 # ====================================================================== #

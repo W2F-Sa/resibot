@@ -200,6 +200,12 @@ class Database:
             (area, state, city, session, config_id),
         )
 
+    def update_config_life(self, config_id: int, life: int) -> None:
+        self.execute(
+            "UPDATE configs SET life = ? WHERE id = ?",
+            (int(life), config_id),
+        )
+
     def deactivate_config(self, config_id: int) -> None:
         self.execute("UPDATE configs SET active = 0 WHERE id = ?", (config_id,))
 

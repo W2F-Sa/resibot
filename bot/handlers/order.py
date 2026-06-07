@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 
 from .. import countries, locations
 from ..config import Settings
-from ..keyboards import country_keyboard, country_results_keyboard, options_keyboard
+from ..keyboards import country_keyboard, country_results_keyboard, life_keyboard, options_keyboard
 from ..proxy import ProxyLocation, normalize_code, validate_code
 from ..service import Service
 from ..states import OrderStates
@@ -40,7 +40,7 @@ async def order_start(message: Message, state: FSMContext) -> None:
     StateFilter(OrderStates.choosing_country, OrderStates.searching_country),
     F.data.startswith("ord_country:"),
 )
-async def order_country(call: CallbackQuery, state: FSMContext) -> None:
+async def order_country(call: CallbackQuery, state: FSMContext, service: Service) -> None:
     value = call.data.split(":", 1)[1]
     await call.answer()
     if value == "__custom__":
@@ -92,7 +92,7 @@ async def _ask_state(message: Message, state: FSMContext, service: Service) -> N
         )
     else:
         await state.update_data(state="", city="")
-        await _ask_volume(message, state, service)
+        await _ask_life(message, state, service)
 
 
 @router.callback_query(OrderStates.choosing_state, F.data.startswith("ord_state:"))
@@ -120,7 +120,7 @@ async def _ask_city(message: Message, state: FSMContext, service: Service) -> No
         )
     else:
         await state.update_data(city="")
-        await _ask_volume(message, state, service)
+        await _ask_life(message, state, service)
 
 
 @router.callback_query(OrderStates.choosing_city, F.data.startswith("ord_city:"))
@@ -129,7 +129,45 @@ async def order_city(call: CallbackQuery, state: FSMContext, service: Service) -
     await call.answer()
     city = "" if value == "__rand__" else value
     await state.update_data(city=city)
+    await _ask_life(call.message, state, service)
+
+
+# ---------------------------------------------------------------------- #
+#  انتخاب زمان تعویض IP (life)
+# ---------------------------------------------------------------------- #
+async def _ask_life(message: Message, state: FSMContext, service: Service) -> None:
+    await state.set_state(OrderStates.choosing_life)
+    await message.answer(
+        "⏱ هر چند وقت یک‌بار IP خودکار عوض شود؟\n"
+        "(می‌توانید «بدون تعویض خودکار» یا یک مقدار دلخواه بین ۱ تا ۱۴۴۰ دقیقه انتخاب کنید)",
+        reply_markup=life_keyboard("ord_life"),
+    )
+
+
+@router.callback_query(OrderStates.choosing_life, F.data.startswith("ord_life:"))
+async def order_life(call: CallbackQuery, state: FSMContext, service: Service) -> None:
+    value = call.data.split(":", 1)[1]
+    await call.answer()
+    if value == "__custom__":
+        await state.set_state(OrderStates.entering_life)
+        await call.message.answer("عدد دلخواه را بفرستید (دقیقه، بین ۱ تا ۱۴۴۰):")
+        return
+    try:
+        life = int(value)
+    except ValueError:
+        life = 0
+    await state.update_data(life=life)
     await _ask_volume(call.message, state, service)
+
+
+@router.message(OrderStates.entering_life)
+async def order_life_text(message: Message, state: FSMContext, service: Service) -> None:
+    text = (message.text or "").strip()
+    if not text.isdigit() or not (1 <= int(text) <= 1440):
+        await message.answer("⛔️ یک عدد بین ۱ تا ۱۴۴۰ بفرستید:")
+        return
+    await state.update_data(life=int(text))
+    await _ask_volume(message, state, service)
 
 
 async def _ask_volume(message: Message, state: FSMContext, service: Service) -> None:
@@ -166,10 +204,11 @@ async def order_volume(message: Message, state: FSMContext, service: Service, cf
         state=data.get("state", ""),
         city=data.get("city", ""),
     )
+    life = data.get("life", None)
 
     wait = await message.answer("⏳ در حال ساخت کانفیگ... لطفاً چند لحظه صبر کنید.")
     try:
-        result = await service.provision_config(message.from_user.id, location, volume)
+        result = await service.provision_config(message.from_user.id, location, volume, life=life)
     except ValueError as exc:
         await wait.edit_text(f"⛔️ {exc}")
         return

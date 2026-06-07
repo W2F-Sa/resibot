@@ -118,6 +118,29 @@ def skip_keyboard(prefix: str) -> InlineKeyboardMarkup:
 
 
 # ---------------------------------------------------------------------- #
+#  انتخاب زمان تعویض خودکار IP (life بر حسب دقیقه)
+# ---------------------------------------------------------------------- #
+LIFE_PRESETS = [10, 30, 60, 120, 360, 720, 1440]
+
+
+def life_keyboard(prefix: str) -> InlineKeyboardMarkup:
+    """دکمه‌های انتخاب زمان تعویض IP. مقدار 0 یعنی بدون تعویض خودکار."""
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for m in LIFE_PRESETS:
+        label = f"{m} دقیقه" if m < 60 else (f"{m // 60} ساعت" if m % 60 == 0 else f"{m} دقیقه")
+        row.append(InlineKeyboardButton(text=label, callback_data=f"{prefix}:{m}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="🔒 بدون تعویض خودکار", callback_data=f"{prefix}:0")])
+    rows.append([InlineKeyboardButton(text="✍️ مقدار دلخواه (دقیقه)", callback_data=f"{prefix}:__custom__")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------- #
 #  لیست کانفیگ‌ها (هر کدام یک دکمه)
 # ---------------------------------------------------------------------- #
 def configs_list_keyboard(rows: list, *, show_owner: bool = False) -> InlineKeyboardMarkup:
@@ -148,6 +171,9 @@ def config_actions(config_id: int, *, is_admin: bool = False) -> InlineKeyboardM
         [
             InlineKeyboardButton(text="🗺 تغییر استان", callback_data=f"cfg_state:{config_id}"),
             InlineKeyboardButton(text="🏙 تغییر شهر", callback_data=f"cfg_city:{config_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="⏱ زمان تعویض IP", callback_data=f"cfg_life:{config_id}"),
         ],
         [
             InlineKeyboardButton(text="📈 مصرف", callback_data=f"cfg_usage:{config_id}"),
