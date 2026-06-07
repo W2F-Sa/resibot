@@ -105,6 +105,9 @@ def config_actions(config_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📈 مصرف", callback_data=f"cfg_usage:{config_id}"),
                 InlineKeyboardButton(text="🔗 لینک‌ها", callback_data=f"cfg_links:{config_id}"),
             ],
+            [
+                InlineKeyboardButton(text="📡 تست اتصال", callback_data=f"cfg_ping:{config_id}"),
+            ],
         ]
     )
 

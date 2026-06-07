@@ -27,6 +27,7 @@ from .inbound import (
     build_client,
     build_inbound_payload,
     build_sub_link,
+    build_vless_link,
 )
 from .panel import PanelClient, PanelError
 from .proxy import ProxyLocation, build_username, generate_session
@@ -121,7 +122,13 @@ class Service:
     # ------------------------------------------------------------------ #
     async def _panel_settings(self, force: bool = False) -> dict[str, Any]:
         if self._panel_settings_cache is None or force:
-            self._panel_settings_cache = await self.panel.get_panel_settings()
+            try:
+                self._panel_settings_cache = await self.panel.get_panel_settings()
+            except PanelError as exc:
+                # اگر مسیر /panel/setting/all در دسترس نبود (مثلاً فقط توکن داریم)،
+                # با dict خالی ادامه می‌دهیم و از مقادیر env فالبک می‌گیریم.
+                logger.warning("دریافت تنظیمات پنل ناموفق بود، از env فالبک می‌گیریم: %s", exc)
+                self._panel_settings_cache = {}
         return self._panel_settings_cache
 
     async def _pick_free_port(self) -> int:
@@ -136,8 +143,9 @@ class Service:
 
     async def _build_inbound_spec(self) -> InboundSpec:
         ps = await self._panel_settings()
-        cert_file = ps.get("webCertFile", "") or ""
-        key_file = ps.get("webKeyFile", "") or ""
+        # ترجیح با مقادیر پنل؛ در نبود آن، فالبک به env
+        cert_file = (ps.get("webCertFile") or "") or self.cfg.panel_cert_file
+        key_file = (ps.get("webKeyFile") or "") or self.cfg.panel_key_file
         return InboundSpec(
             sni=self.sni,
             host=self.host,
@@ -154,14 +162,32 @@ class Service:
         sub_uri = (ps.get("subURI") or "").strip()
         if sub_uri:
             return sub_uri.rstrip("/") + "/" + sub_id
-        sub_port = ps.get("subPort", 2096)
-        sub_path = ps.get("subPath", "/sub/")
-        scheme = "https" if (ps.get("subCertFile") or "").strip() else "http"
+        # ترجیح با تنظیمات پنل؛ در نبود آن فالبک به env
+        sub_port = ps.get("subPort") or self.cfg.sub_port
+        sub_path = ps.get("subPath") or self.cfg.sub_path
+        if ps.get("subPort"):
+            scheme = "https" if (ps.get("subCertFile") or "").strip() else "http"
+        else:
+            scheme = "https" if self.cfg.sub_secure else "http"
         base = f"{scheme}://{self.server_ip}:{sub_port}"
         return build_sub_link(base, sub_path, sub_id)
 
     def _smartproxy_username(self, loc: ProxyLocation) -> str:
         return build_username(self.cfg.smartproxy_user_base, loc)
+
+    def _vless_link(self, uuid: str, port: int, remark: str) -> str:
+        return build_vless_link(
+            uuid=uuid,
+            server=self.server_ip,
+            port=port,
+            sni=self.sni,
+            host=self.host,
+            path=self.inbound_path,
+            alpn=self.cfg.inbound_alpn,
+            fingerprint=self.cfg.inbound_fingerprint,
+            sc_max_each_post_bytes=self.cfg.inbound_sc_max_each_post_bytes,
+            remark=remark,
+        )
 
     async def _apply_outbound(
         self, inbound_tag: str, outbound_tag: str, username: str
@@ -277,10 +303,8 @@ class Service:
 
         # 4) لینک‌ها
         sub_link = self._sub_link_for(ps, sub_id)
-        try:
-            vless_links = await self.panel.get_client_links(inbound_id, email)
-        except PanelError:
-            vless_links = []
+        # لینک vless دقیق مطابق الگو (با allowInsecure تا خطای TLS ندهد)
+        vless_links = [self._vless_link(uuid, port, remark)]
 
         return ProvisionResult(
             config_id=config_id,
@@ -381,6 +405,27 @@ class Service:
         except PanelError:
             return {}
 
+    async def test_outbound_for(self, config_id: int) -> dict[str, Any]:
+        """اوتباند یک کانفیگ را پینگ می‌کند و نتیجه را برمی‌گرداند."""
+        row = self.db.get_config(config_id)
+        if not row:
+            raise ValueError("کانفیگ پیدا نشد.")
+        loc = ProxyLocation(
+            area=row["area"], state=row["state"], city=row["city"],
+            life=self.cfg.smartproxy_life, session=row["session"],
+        )
+        username = self._smartproxy_username(loc)
+        outbound = xc.build_smartproxy_outbound(
+            tag=row["outbound_tag"],
+            host=self.cfg.smartproxy_host,
+            port=self.cfg.smartproxy_port,
+            username=username,
+            password=self.cfg.smartproxy_password,
+        )
+        res = await self.panel.test_outbound(outbound, mode="tcp")
+        obj = res.get("obj", {}) if isinstance(res, dict) else {}
+        return obj or {}
+
     def build_report(self) -> str:
         configs = self.db.list_all_configs()
         resellers = self.db.list_resellers()
@@ -414,13 +459,9 @@ class Service:
     #  کمکی‌های نمایش لینک
     # ------------------------------------------------------------------ #
     async def config_links(self, row) -> tuple[str, list[str]]:
-        """لینک ساب و لینک‌های مستقیم یک کانفیگ موجود را برمی‌گرداند."""
+        """لینک ساب و لینک مستقیم یک کانفیگ موجود را برمی‌گرداند."""
         ps = await self._panel_settings()
         sub_link = self._sub_link_for(ps, row["sub_id"])
-        try:
-            vless_links = await self.panel.get_client_links(
-                row["inbound_id"], row["client_email"]
-            )
-        except PanelError:
-            vless_links = []
+        remark = f"resibot-{row['owner_tg_id']}-{row['port']}"
+        vless_links = [self._vless_link(row["client_uuid"], row["port"], remark)]
         return sub_link, vless_links

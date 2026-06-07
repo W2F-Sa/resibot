@@ -98,15 +98,11 @@ if [[ "$RECONF" =~ ^[Yy]$ ]]; then
   echo
   bold "— اطلاعات پنل 3x-ui —"
   ask PANEL_BASE_URL "آدرس کامل پنل همراه با مسیر (مثل https://دامنه:2053/abc)"
-  echo "روش احراز هویت: 1) توکن API (توصیه‌شده)  2) یوزرنیم/پسورد"
-  ask AUTH_MODE "انتخاب کنید (1/2)" "1"
-  PANEL_API_TOKEN=""; PANEL_USERNAME=""; PANEL_PASSWORD=""
-  if [[ "$AUTH_MODE" == "1" ]]; then
-    ask_secret PANEL_API_TOKEN "توکن API پنل (Settings → Security)"
-  else
-    ask PANEL_USERNAME "یوزرنیم پنل"
-    ask_secret PANEL_PASSWORD "پسورد پنل"
-  fi
+  echo "نکته: یوزرنیم/پسورد پنل برای مدیریت اوتباند و تنظیمات لازم است."
+  echo "توکن API اختیاری است و فقط برای مسیرهای /panel/api/* استفاده می‌شود."
+  ask PANEL_USERNAME "یوزرنیم پنل"
+  ask_secret PANEL_PASSWORD "پسورد پنل"
+  ask_secret PANEL_API_TOKEN "توکن API پنل (اختیاری - برای رد شدن خالی بگذارید و Enter بزنید)"
 
   echo
   bold "— سرور و اینباند —"
@@ -146,6 +142,13 @@ INBOUND_FINGERPRINT=chrome
 INBOUND_SC_MAX_EACH_POST_BYTES=5000000
 PORT_RANGE_MIN=10000
 PORT_RANGE_MAX=60000
+
+# فالبک‌های اختیاری (اگر تنظیمات پنل خوانده نشد)
+PANEL_CERT_FILE=
+PANEL_KEY_FILE=
+SUB_PORT=2096
+SUB_PATH=/sub/
+SUB_SECURE=true
 
 SMARTPROXY_HOST=proxy.smartproxy.net
 SMARTPROXY_PORT=3120

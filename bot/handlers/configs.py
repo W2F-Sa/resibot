@@ -110,6 +110,32 @@ async def show_usage(call: CallbackQuery, service: Service, db: Database, cfg: S
 
 
 # ---------------------------------------------------------------------- #
+#  تست اتصال (پینگ اوتباند)
+# ---------------------------------------------------------------------- #
+@router.callback_query(F.data.startswith("cfg_ping:"))
+async def ping_outbound(call: CallbackQuery, service: Service, db: Database, cfg: Settings) -> None:
+    config_id = int(call.data.split(":", 1)[1])
+    row = _access_or_none(config_id, call.from_user.id, cfg, db)
+    if not row:
+        await call.answer("دسترسی ندارید یا کانفیگ یافت نشد.", show_alert=True)
+        return
+    await call.answer("در حال تست اتصال...")
+    msg = await call.message.answer("📡 در حال تست اتصال اوتباند...")
+    try:
+        res = await service.test_outbound_for(config_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ping failed")
+        await msg.edit_text(f"❌ خطا در تست اتصال:\n<code>{exc}</code>")
+        return
+    ok = bool(res.get("success"))
+    delay = res.get("delay")
+    if ok:
+        await msg.edit_text(f"✅ اتصال برقرار است.\n⏱ تأخیر: <b>{delay} ms</b>")
+    else:
+        await msg.edit_text("⚠️ اتصال ناموفق بود. لطفاً لوکیشن/IP را تغییر دهید یا دوباره تست کنید.")
+
+
+# ---------------------------------------------------------------------- #
 #  لینک‌ها
 # ---------------------------------------------------------------------- #
 @router.callback_query(F.data.startswith("cfg_links:"))

@@ -46,6 +46,13 @@ def _get_float(name: str, default: float) -> float:
         return default
 
 
+def _get_bool(name: str, default: bool) -> bool:
+    raw = _get(name, "").lower()
+    if raw == "":
+        return default
+    return raw in ("1", "true", "yes", "on", "y")
+
+
 class ConfigError(Exception):
     """خطای پیکربندی نامعتبر."""
 
@@ -81,6 +88,15 @@ class Settings:
     smartproxy_user_base: str = field(default_factory=lambda: _get("SMARTPROXY_USER_BASE"))
     smartproxy_password: str = field(default_factory=lambda: _get("SMARTPROXY_PASSWORD"))
     smartproxy_life: int = field(default_factory=lambda: _get_int("SMARTPROXY_LIFE", 120))
+
+    # فالبک‌های اختیاری وقتی /panel/setting/all در دسترس نیست
+    # مسیر فایل گواهی/کلید پنل (همان مقادیر "Set as panel")
+    panel_cert_file: str = field(default_factory=lambda: _get("PANEL_CERT_FILE"))
+    panel_key_file: str = field(default_factory=lambda: _get("PANEL_KEY_FILE"))
+    # تنظیمات سرور اشتراک (subscription) برای ساخت لینک ساب
+    sub_port: int = field(default_factory=lambda: _get_int("SUB_PORT", 2096))
+    sub_path: str = field(default_factory=lambda: _get("SUB_PATH", "/sub/"))
+    sub_secure: bool = field(default_factory=lambda: _get_bool("SUB_SECURE", True))
 
     # قوانین فروش
     min_volume_gb: int = field(default_factory=lambda: _get_int("MIN_VOLUME_GB", 5))

@@ -144,3 +144,46 @@ def build_sub_link(sub_base_url: str, sub_path: str, sub_id: str) -> str:
     base = sub_base_url.rstrip("/")
     path = "/" + sub_path.strip("/") + "/"
     return f"{base}{path}{sub_id}"
+
+
+def build_vless_link(
+    *,
+    uuid: str,
+    server: str,
+    port: int,
+    sni: str,
+    host: str,
+    path: str,
+    alpn: str,
+    fingerprint: str,
+    sc_max_each_post_bytes: int,
+    remark: str,
+) -> str:
+    """لینک vless را دقیقاً مطابق الگوی موردنظر می‌سازد (با insecure/allowInsecure).
+
+    چون SNI ممکن است با گواهی سرور یکی نباشد، insecure=1&allowInsecure=1 لازم است
+    تا کلاینت موقع اتصال خطای TLS نگیرد.
+    """
+    from urllib.parse import quote
+
+    extra = json.dumps(
+        {"mode": "auto", "scMaxEachPostBytes": str(sc_max_each_post_bytes)},
+        separators=(",", ":"),
+    )
+    alpn_q = quote(alpn, safe="")
+    query = (
+        "encryption=none"
+        "&security=tls"
+        f"&sni={quote(sni, safe='')}"
+        f"&fp={quote(fingerprint, safe='')}"
+        f"&alpn={alpn_q}"
+        "&insecure=1"
+        "&allowInsecure=1"
+        "&type=xhttp"
+        f"&host={quote(host, safe='')}"
+        f"&path={quote(path, safe='')}"
+        "&mode=auto"
+        f"&extra={quote(extra, safe='')}"
+    )
+    fragment = quote(remark, safe="")
+    return f"vless://{uuid}@{server}:{port}?{query}#{fragment}"

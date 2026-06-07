@@ -16,3 +16,7 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+
+
+# فایل‌های موقت تست محلی (هرگز کامیت نشوند)
+scratch_*.py
