@@ -4,11 +4,13 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from .. import countries
 from ..config import Settings
-from ..keyboards import country_keyboard, skip_keyboard
+from ..keyboards import country_keyboard, country_results_keyboard, skip_keyboard
 from ..proxy import ProxyLocation, normalize_code, validate_code
 from ..service import Service
 from ..states import OrderStates
@@ -34,7 +36,10 @@ async def order_start(message: Message, state: FSMContext) -> None:
 # ---------------------------------------------------------------------- #
 #  انتخاب کشور
 # ---------------------------------------------------------------------- #
-@router.callback_query(OrderStates.choosing_country, F.data.startswith("ord_country:"))
+@router.callback_query(
+    StateFilter(OrderStates.choosing_country, OrderStates.searching_country),
+    F.data.startswith("ord_country:"),
+)
 async def order_country(call: CallbackQuery, state: FSMContext) -> None:
     value = call.data.split(":", 1)[1]
     await call.answer()
@@ -42,9 +47,25 @@ async def order_country(call: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(OrderStates.entering_country)
         await call.message.answer("کد کشور را وارد کنید (مثلاً US یا GB):")
         return
+    if value == "__search__":
+        await state.set_state(OrderStates.searching_country)
+        await call.message.answer("🔍 نام یا کد کشور را بفرستید (مثلاً: Germany یا DE):")
+        return
     area = "" if value == "__skip__" else value
     await state.update_data(area=area)
     await _ask_state(call.message, state)
+
+
+@router.message(OrderStates.searching_country)
+async def order_country_search(message: Message, state: FSMContext) -> None:
+    results = countries.search(message.text or "")
+    if not results:
+        await message.answer("کشوری پیدا نشد. دوباره نام یا کد کشور را بفرستید:")
+        return
+    await message.answer(
+        "یکی را انتخاب کنید:",
+        reply_markup=country_results_keyboard("ord_country", results),
+    )
 
 
 @router.message(OrderStates.entering_country)
@@ -60,7 +81,7 @@ async def order_country_text(message: Message, state: FSMContext) -> None:
 async def _ask_state(message: Message, state: FSMContext) -> None:
     await state.set_state(OrderStates.entering_state)
     await message.answer(
-        "🏙 کد استان (state) را وارد کنید یا رد کنید:\n(مثلاً California)",
+        "🏙 کد استان (state) را وارد کنید یا «تصادفی» بزنید:\n(مثلاً California)",
         reply_markup=skip_keyboard("ord_state"),
     )
 
@@ -88,7 +109,7 @@ async def order_state_text(message: Message, state: FSMContext) -> None:
 async def _ask_city(message: Message, state: FSMContext) -> None:
     await state.set_state(OrderStates.entering_city)
     await message.answer(
-        "🏙 کد شهر (city) را وارد کنید یا رد کنید:\n(مثلاً NewYork)",
+        "🏙 کد شهر (city) را وارد کنید یا «تصادفی» بزنید:\n(مثلاً NewYork)",
         reply_markup=skip_keyboard("ord_city"),
     )
 

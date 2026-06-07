@@ -7,6 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 class OrderStates(StatesGroup):
     """مراحل ثبت سفارش جدید توسط نماینده."""
     choosing_country = State()
+    searching_country = State()  # جستجوی کشور با نام
     entering_country = State()   # ورود دستی کد کشور
     entering_state = State()     # اختیاری
     entering_city = State()      # اختیاری
@@ -16,6 +17,7 @@ class OrderStates(StatesGroup):
 class ChangeLocationStates(StatesGroup):
     """مراحل تغییر لوکیشن یک کانفیگ موجود."""
     choosing_country = State()
+    searching_country = State()
     entering_country = State()
     entering_state = State()
     entering_city = State()

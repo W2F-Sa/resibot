@@ -8,7 +8,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from .proxy import COMMON_COUNTRIES
+from . import countries
 
 
 # ---------------------------------------------------------------------- #
@@ -39,19 +39,22 @@ def reseller_menu() -> ReplyKeyboardMarkup:
 #  انتخاب کشور
 # ---------------------------------------------------------------------- #
 def country_keyboard(prefix: str) -> InlineKeyboardMarkup:
-    """دکمه‌های کشورهای پرکاربرد + گزینه‌ی ورود دستی.
+    """دکمه‌های کشورهای پرکاربرد + جستجو + تصادفی + کد دلخواه.
 
     prefix: پیشوند callback مثل "ord_country" یا "loc_country".
     """
     rows: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
-    for code, label in COMMON_COUNTRIES:
-        row.append(InlineKeyboardButton(text=label, callback_data=f"{prefix}:{code}"))
+    for code, lbl in countries.popular():
+        row.append(InlineKeyboardButton(text=lbl, callback_data=f"{prefix}:{code}"))
         if len(row) == 2:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="🔍 جستجوی کشور", callback_data=f"{prefix}:__search__"),
+    ])
     rows.append([
         InlineKeyboardButton(text="✍️ کد دلخواه", callback_data=f"{prefix}:__custom__"),
         InlineKeyboardButton(text="🎲 تصادفی", callback_data=f"{prefix}:__skip__"),
@@ -59,13 +62,31 @@ def country_keyboard(prefix: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def country_results_keyboard(prefix: str, results: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    """نتایج جستجوی کشور را به‌صورت دکمه نشان می‌دهد."""
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for code, lbl in results:
+        row.append(InlineKeyboardButton(text=lbl, callback_data=f"{prefix}:{code}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([
+        InlineKeyboardButton(text="🔍 جستجوی دوباره", callback_data=f"{prefix}:__search__"),
+        InlineKeyboardButton(text="🎲 تصادفی", callback_data=f"{prefix}:__skip__"),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # ---------------------------------------------------------------------- #
-#  انتخاب state/city (اختیاری)
+#  انتخاب state/city (اختیاری) — با گزینه‌ی تصادفی
 # ---------------------------------------------------------------------- #
 def skip_keyboard(prefix: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⏭ رد کردن", callback_data=f"{prefix}:__skip__")]
+            [InlineKeyboardButton(text="🎲 تصادفی", callback_data=f"{prefix}:__skip__")]
         ]
     )
 

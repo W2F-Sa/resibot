@@ -42,6 +42,15 @@ class PanelClient:
         self._logged_in = False
 
     # ------------------------------------------------------------------ #
+    def _url(self, path: str) -> str:
+        """آدرس کامل را می‌سازد و base path پنل را حفظ می‌کند.
+
+        نکته‌ی مهم: نباید از base_url خود httpx برای join استفاده کنیم، چون اگر
+        path با / شروع شود httpx مسیرِ base path پنل را حذف می‌کند و باعث 404
+        می‌شود. پس همیشه دستی به base_url می‌چسبانیم.
+        """
+        return self.base_url + "/" + path.lstrip("/")
+
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None:
             headers = {"Accept": "application/json"}
@@ -49,7 +58,6 @@ class PanelClient:
                 headers["Authorization"] = f"Bearer {self.api_token}"
             # verify=False تا گواهی self-signed پنل باعث خطای SSL نشود
             self._client = httpx.AsyncClient(
-                base_url=self.base_url,
                 headers=headers,
                 timeout=self._timeout,
                 verify=False,
@@ -74,7 +82,7 @@ class PanelClient:
                 return
             client = await self._ensure_client()
             resp = await client.post(
-                "/login",
+                self._url("/login"),
                 data={"username": self.username, "password": self.password},
             )
             data = self._parse(resp)
@@ -104,7 +112,7 @@ class PanelClient:
         await self._login_if_needed()
         client = await self._ensure_client()
         try:
-            resp = await client.request(method, path, json=json_body, data=data)
+            resp = await client.request(method, self._url(path), json=json_body, data=data)
         except httpx.HTTPError as exc:
             raise PanelError(f"خطای شبکه هنگام تماس با پنل: {exc}") from exc
 
