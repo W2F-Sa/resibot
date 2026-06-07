@@ -8,7 +8,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from . import countries
+from . import countries, locations
 
 
 # ---------------------------------------------------------------------- #
@@ -81,8 +81,34 @@ def country_results_keyboard(prefix: str, results: list[tuple[str, str]]) -> Inl
 
 
 # ---------------------------------------------------------------------- #
-#  انتخاب state/city (اختیاری) — با گزینه‌ی تصادفی
+#  انتخاب state/city از لیست (با گزینه‌ی تصادفی)
 # ---------------------------------------------------------------------- #
+def options_keyboard(
+    prefix: str,
+    items: list[str],
+    *,
+    columns: int = 2,
+    back_cb: str | None = None,
+) -> InlineKeyboardMarkup:
+    """کیبورد انتخاب از یک لیست. هر دکمه callback = f"{prefix}:{item}".
+
+    گزینه‌ی «تصادفی» با مقدار __rand__ و دکمه‌ی بازگشت اختیاری اضافه می‌شود.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for it in items:
+        row.append(InlineKeyboardButton(text=locations.prettify(it), callback_data=f"{prefix}:{it}"))
+        if len(row) == columns:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="🎲 تصادفی", callback_data=f"{prefix}:__rand__")])
+    if back_cb:
+        rows.append([InlineKeyboardButton(text="⬅️ بازگشت", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def skip_keyboard(prefix: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -92,32 +118,50 @@ def skip_keyboard(prefix: str) -> InlineKeyboardMarkup:
 
 
 # ---------------------------------------------------------------------- #
-#  مدیریت یک کانفیگ
+#  لیست کانفیگ‌ها (هر کدام یک دکمه)
 # ---------------------------------------------------------------------- #
-def config_actions(config_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🔄 تغییر IP", callback_data=f"cfg_ip:{config_id}"),
-                InlineKeyboardButton(text="🌍 تغییر لوکیشن", callback_data=f"cfg_loc:{config_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="📈 مصرف", callback_data=f"cfg_usage:{config_id}"),
-                InlineKeyboardButton(text="🔗 لینک‌ها", callback_data=f"cfg_links:{config_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="📡 تست اتصال", callback_data=f"cfg_ping:{config_id}"),
-            ],
-        ]
-    )
+def configs_list_keyboard(rows: list, *, show_owner: bool = False) -> InlineKeyboardMarkup:
+    kb: list[list[InlineKeyboardButton]] = []
+    for r in rows:
+        loc = r["area"] or "RND"
+        if r["state"]:
+            loc += f"/{r['state']}"
+        label = f"#{r['id']} • {loc} • {r['volume_gb']}GB"
+        if show_owner:
+            label += f" • 👤{r['owner_tg_id']}"
+        kb.append([InlineKeyboardButton(text=label, callback_data=f"cfg_open:{r['id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ---------------------------------------------------------------------- #
+#  منوی جزئیات یک کانفیگ
+# ---------------------------------------------------------------------- #
+def config_actions(config_id: int, *, is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="🔄 تغییر IP", callback_data=f"cfg_ip:{config_id}"),
+            InlineKeyboardButton(text="📡 تست اتصال", callback_data=f"cfg_ping:{config_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🌍 تغییر کشور", callback_data=f"cfg_country:{config_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🗺 تغییر استان", callback_data=f"cfg_state:{config_id}"),
+            InlineKeyboardButton(text="🏙 تغییر شهر", callback_data=f"cfg_city:{config_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="📈 مصرف", callback_data=f"cfg_usage:{config_id}"),
+            InlineKeyboardButton(text="🔗 لینک‌ها", callback_data=f"cfg_links:{config_id}"),
+        ],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(text="🗑 حذف کانفیگ", callback_data=f"cfg_del:{config_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ بازگشت به لیست", callback_data="cfg_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_config_actions(config_id: int) -> InlineKeyboardMarkup:
-    kb = config_actions(config_id)
-    kb.inline_keyboard.append(
-        [InlineKeyboardButton(text="🗑 حذف کانفیگ", callback_data=f"cfg_del:{config_id}")]
-    )
-    return kb
+    return config_actions(config_id, is_admin=True)
 
 
 def confirm_delete(config_id: int) -> InlineKeyboardMarkup:
@@ -125,7 +169,7 @@ def confirm_delete(config_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="✅ بله، حذف کن", callback_data=f"cfg_delyes:{config_id}"),
-                InlineKeyboardButton(text="❌ انصراف", callback_data="cfg_delno"),
+                InlineKeyboardButton(text="❌ انصراف", callback_data=f"cfg_open:{config_id}"),
             ]
         ]
     )

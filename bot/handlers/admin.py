@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from ..config import Settings
 from ..database import Database
 from ..keyboards import (
-    admin_config_actions,
+    configs_list_keyboard,
     resellers_menu,
     settings_menu,
 )
@@ -36,12 +36,10 @@ async def list_all_configs(message: Message, db: Database) -> None:
     if not rows:
         await message.answer("هیچ کانفیگ فعالی وجود ندارد.")
         return
-    await message.answer(f"📋 مجموع کانفیگ‌های فعال: <b>{len(rows)}</b>")
-    for row in rows[:30]:
-        await message.answer(
-            config_summary(row, show_owner=True),
-            reply_markup=admin_config_actions(row["id"]),
-        )
+    await message.answer(
+        f"📋 کانفیگ‌های فعال (<b>{len(rows)}</b>) — یکی را انتخاب کنید:",
+        reply_markup=configs_list_keyboard(rows[:50], show_owner=True),
+    )
 
 
 # ---------------------------------------------------------------------- #

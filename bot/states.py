@@ -9,18 +9,18 @@ class OrderStates(StatesGroup):
     choosing_country = State()
     searching_country = State()  # جستجوی کشور با نام
     entering_country = State()   # ورود دستی کد کشور
-    entering_state = State()     # اختیاری
-    entering_city = State()      # اختیاری
+    choosing_state = State()     # انتخاب استان از لیست
+    choosing_city = State()      # انتخاب شهر از لیست
     entering_volume = State()
 
 
 class ChangeLocationStates(StatesGroup):
-    """مراحل تغییر لوکیشن یک کانفیگ موجود."""
+    """مراحل تغییر کشور یک کانفیگ موجود."""
     choosing_country = State()
     searching_country = State()
     entering_country = State()
-    entering_state = State()
-    entering_city = State()
+    choosing_state = State()
+    choosing_city = State()
 
 
 class AdminStates(StatesGroup):

@@ -8,9 +8,9 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from .. import countries
+from .. import countries, locations
 from ..config import Settings
-from ..keyboards import country_keyboard, country_results_keyboard, skip_keyboard
+from ..keyboards import country_keyboard, country_results_keyboard, options_keyboard
 from ..proxy import ProxyLocation, normalize_code, validate_code
 from ..service import Service
 from ..states import OrderStates
@@ -53,7 +53,7 @@ async def order_country(call: CallbackQuery, state: FSMContext) -> None:
         return
     area = "" if value == "__skip__" else value
     await state.update_data(area=area)
-    await _ask_state(call.message, state)
+    await _ask_state(call.message, state, service)
 
 
 @router.message(OrderStates.searching_country)
@@ -69,69 +69,67 @@ async def order_country_search(message: Message, state: FSMContext) -> None:
 
 
 @router.message(OrderStates.entering_country)
-async def order_country_text(message: Message, state: FSMContext) -> None:
+async def order_country_text(message: Message, state: FSMContext, service: Service) -> None:
     code = normalize_code(message.text or "")
     if not validate_code(code) or not code:
         await message.answer("⛔️ کد نامعتبر است. فقط حروف/عدد/خط‌تیره. دوباره بفرستید:")
         return
     await state.update_data(area=code)
-    await _ask_state(message, state)
-
-
-async def _ask_state(message: Message, state: FSMContext) -> None:
-    await state.set_state(OrderStates.entering_state)
-    await message.answer(
-        "🏙 کد استان (state) را وارد کنید یا «تصادفی» بزنید:\n(مثلاً California)",
-        reply_markup=skip_keyboard("ord_state"),
-    )
+    await _ask_state(message, state, service)
 
 
 # ---------------------------------------------------------------------- #
-#  استان
+#  انتخاب استان (state) از لیست
 # ---------------------------------------------------------------------- #
-@router.callback_query(OrderStates.entering_state, F.data == "ord_state:__skip__")
-async def order_state_skip(call: CallbackQuery, state: FSMContext) -> None:
+async def _ask_state(message: Message, state: FSMContext, service: Service) -> None:
+    data = await state.get_data()
+    area = data.get("area", "")
+    if locations.has_states(area):
+        await state.set_state(OrderStates.choosing_state)
+        await message.answer(
+            f"🗺 استان موردنظر در {countries.display_name(area)} را انتخاب کنید:",
+            reply_markup=options_keyboard("ord_state", locations.states(area)),
+        )
+    else:
+        await state.update_data(state="", city="")
+        await _ask_volume(message, state, service)
+
+
+@router.callback_query(OrderStates.choosing_state, F.data.startswith("ord_state:"))
+async def order_state(call: CallbackQuery, state: FSMContext, service: Service) -> None:
+    value = call.data.split(":", 1)[1]
     await call.answer()
-    await state.update_data(state="")
-    await _ask_city(call.message, state)
-
-
-@router.message(OrderStates.entering_state)
-async def order_state_text(message: Message, state: FSMContext) -> None:
-    code = normalize_code(message.text or "")
-    if not validate_code(code):
-        await message.answer("⛔️ کد نامعتبر است. دوباره بفرستید یا رد کنید:")
-        return
-    await state.update_data(state=code)
-    await _ask_city(message, state)
-
-
-async def _ask_city(message: Message, state: FSMContext) -> None:
-    await state.set_state(OrderStates.entering_city)
-    await message.answer(
-        "🏙 کد شهر (city) را وارد کنید یا «تصادفی» بزنید:\n(مثلاً NewYork)",
-        reply_markup=skip_keyboard("ord_city"),
-    )
+    st = "" if value == "__rand__" else value
+    await state.update_data(state=st)
+    await _ask_city(call.message, state, service)
 
 
 # ---------------------------------------------------------------------- #
-#  شهر
+#  انتخاب شهر (city) از لیست
 # ---------------------------------------------------------------------- #
-@router.callback_query(OrderStates.entering_city, F.data == "ord_city:__skip__")
-async def order_city_skip(call: CallbackQuery, state: FSMContext, service: Service) -> None:
+async def _ask_city(message: Message, state: FSMContext, service: Service) -> None:
+    data = await state.get_data()
+    area = data.get("area", "")
+    st = data.get("state", "")
+    city_list = locations.cities(area, st) if st else []
+    if city_list:
+        await state.set_state(OrderStates.choosing_city)
+        await message.answer(
+            f"🏙 شهر موردنظر در {locations.prettify(st)} را انتخاب کنید:",
+            reply_markup=options_keyboard("ord_city", city_list),
+        )
+    else:
+        await state.update_data(city="")
+        await _ask_volume(message, state, service)
+
+
+@router.callback_query(OrderStates.choosing_city, F.data.startswith("ord_city:"))
+async def order_city(call: CallbackQuery, state: FSMContext, service: Service) -> None:
+    value = call.data.split(":", 1)[1]
     await call.answer()
-    await state.update_data(city="")
+    city = "" if value == "__rand__" else value
+    await state.update_data(city=city)
     await _ask_volume(call.message, state, service)
-
-
-@router.message(OrderStates.entering_city)
-async def order_city_text(message: Message, state: FSMContext, service: Service) -> None:
-    code = normalize_code(message.text or "")
-    if not validate_code(code):
-        await message.answer("⛔️ کد نامعتبر است. دوباره بفرستید یا رد کنید:")
-        return
-    await state.update_data(city=code)
-    await _ask_volume(message, state, service)
 
 
 async def _ask_volume(message: Message, state: FSMContext, service: Service) -> None:
