@@ -215,10 +215,15 @@ def test_price_tiers():
 
 
 def test_payer_for():
-    assert Service._payer_for(ROLE_ADMIN) == "admin"
-    assert Service._payer_for(ROLE_RESIDENTIAL_RESELLER) == "postpaid"
-    assert Service._payer_for(ROLE_V2RAY_RESELLER) == "wallet"
-    assert Service._payer_for(ROLE_USER) == "wallet"
+    assert Service._payer_for(ROLE_ADMIN, PRODUCT_RESIDENTIAL) == "admin"
+    assert Service._payer_for(ROLE_RESIDENTIAL_RESELLER, PRODUCT_RESIDENTIAL) == "postpaid"
+    # رزیدنتال برای غیرهمکار مجاز نیست
+    assert Service._payer_for(ROLE_USER, PRODUCT_RESIDENTIAL) == "denied"
+    assert Service._payer_for(ROLE_V2RAY_RESELLER, PRODUCT_RESIDENTIAL) == "denied"
+    # V2Ray از کیف پول
+    assert Service._payer_for(ROLE_USER, PRODUCT_V2RAY) == "wallet"
+    assert Service._payer_for(ROLE_V2RAY_RESELLER, PRODUCT_V2RAY) == "wallet"
+    assert Service._payer_for(ROLE_ADMIN, PRODUCT_V2RAY) == "admin"
 
 
 def test_wallet_atomic_deduct():

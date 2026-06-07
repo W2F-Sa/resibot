@@ -132,10 +132,9 @@ if [[ "$RECONF" =~ ^[Yy]$ ]]; then
 
   echo
   bold "— درگاه پرداخت NowPayments (برای شارژ کیف پول) —"
-  echo "اگر فعلاً نمی‌خواهید، خالی بگذارید و Enter بزنید."
-  ask_secret NOWPAYMENTS_API_KEY "NowPayments API Key"
-  ask_secret NOWPAYMENTS_IPN_SECRET "NowPayments IPN Secret"
-  ask NOWPAYMENTS_PUBLIC_KEY "NowPayments Public Key (اختیاری)"
+  ask NOWPAYMENTS_API_KEY "NowPayments API Key" "WYVJA75-C4AMHZA-GTH583W-MD9GR9R"
+  ask NOWPAYMENTS_IPN_SECRET "NowPayments IPN Secret" "A8+fRQbTiIxxmmQcMa20zBT7sg1BcTN+"
+  ask NOWPAYMENTS_PUBLIC_KEY "NowPayments Public Key" "62869df6-47c1-4cf5-a446-47c405fccbab"
   ask NOWPAYMENTS_PRICE_CURRENCY "ارز قیمت‌گذاری درگاه (مثل usd)" "usd"
   ask PUBLIC_BASE_URL "آدرس عمومی برای IPN (مثل https://دامنه:8090)"
   ask IPN_PORT "پورت سرور IPN" "8090"

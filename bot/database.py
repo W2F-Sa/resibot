@@ -352,6 +352,10 @@ class Database:
         row = self.query_one("SELECT COUNT(*) AS c FROM users")
         return int(row["c"]) if row else 0
 
+    def all_user_ids(self) -> list[int]:
+        rows = self.query_all("SELECT tg_id FROM users")
+        return [int(r["tg_id"]) for r in rows]
+
     # ------------------------------------------------------------------ #
     # partnership requests
     # ------------------------------------------------------------------ #

@@ -36,7 +36,15 @@ router = Router(name="order")
 #  شروع سفارش از منوی محصولات
 # ---------------------------------------------------------------------- #
 @router.callback_query(F.data == "buy:residential")
-async def buy_residential(call: CallbackQuery, state: FSMContext) -> None:
+async def buy_residential(call: CallbackQuery, state: FSMContext, role: str, is_admin: bool) -> None:
+    if not (is_admin or role == ROLE_RESIDENTIAL_RESELLER):
+        await call.answer()
+        await call.message.answer(
+            "🌐 <b>کانفیگ رزیدنتال</b>\n\n"
+            "این محصول فقط برای <b>همکاران رزیدنتال</b> در دسترس است.\n"
+            "برای دریافت دسترسی با ادمین هماهنگ کنید."
+        )
+        return
     await state.clear()
     await state.set_state(OrderStates.choosing_country)
     await state.update_data(product=PRODUCT_RESIDENTIAL)
@@ -235,7 +243,8 @@ async def order_volume(message: Message, state: FSMContext, service: Service, ro
     await state.set_state(OrderStates.confirming)
 
     price = service.quote(role, product, volume)
-    payer = service._payer_for(role)
+    payer = service._payer_for(role, product)
+    cur = service.product_currency(product)
     loc_txt = _loc_text(data)
     life = data.get("life", None)
     life_txt = "بدون تعویض خودکار" if not life else f"هر {life} دقیقه"
@@ -254,7 +263,7 @@ async def order_volume(message: Message, state: FSMContext, service: Service, ro
         f"⏱ تعویض IP: {life_txt}\n"
         f"📦 حجم: <b>{volume} GB</b>\n"
         f"⏳ مدت: <b>{service.cfg.config_duration_days} روز</b>\n"
-        f"💵 مبلغ: <b>{price:g} {service.currency}</b>\n"
+        f"💵 مبلغ: <b>{price:g} {cur}</b>\n"
         f"{pay_line}",
         reply_markup=confirm_purchase_keyboard(),
     )
@@ -297,6 +306,9 @@ async def order_confirm(call: CallbackQuery, state: FSMContext, service: Service
             reply_markup=topup_after_insufficient_keyboard(),
         )
         return
+    except PermissionError as exc:
+        await wait.edit_text(f"⛔️ {exc}")
+        return
     except ValueError as exc:
         await wait.edit_text(f"⛔️ {exc}")
         return
@@ -311,7 +323,8 @@ async def order_confirm(call: CallbackQuery, state: FSMContext, service: Service
     if call.from_user.id != cfg.admin_id:
         u = call.from_user
         uname = f"@{u.username}" if u.username else (u.full_name or "—")
-        payer = service._payer_for(role)
+        cur = service.product_currency(product)
+        payer = service._payer_for(role, product)
         pay_note = {"postpaid": "پس‌پرداخت", "wallet": "از کیف پول", "admin": "ادمین"}.get(payer, payer)
         try:
             await call.bot.send_message(
@@ -319,7 +332,7 @@ async def order_confirm(call: CallbackQuery, state: FSMContext, service: Service
                 "🛒 <b>سفارش جدید</b>\n"
                 f"👤 کاربر: {uname} (<code>{u.id}</code>)\n"
                 f"📦 حجم: <b>{result.volume_gb} GB</b>\n"
-                f"💵 مبلغ: <b>{result.price:g} {service.currency}</b> ({pay_note})\n"
+                f"💵 مبلغ: <b>{result.price:g} {cur}</b> ({pay_note})\n"
                 f"🆔 سرویس: <code>#{result.config_id}</code>",
             )
         except Exception:  # noqa: BLE001

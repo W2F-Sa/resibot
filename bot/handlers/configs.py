@@ -387,16 +387,20 @@ async def renew_volume(message: Message, state: FSMContext, db: Database, servic
     except ValueError as exc:
         await wait.edit_text(f"⛔️ {exc}")
         return
+    except PermissionError as exc:
+        await wait.edit_text(f"⛔️ {exc}")
+        return
     except Exception as exc:  # noqa: BLE001
         logger.exception("renew failed")
         await wait.edit_text(f"❌ خطا در تمدید:\n<code>{exc}</code>")
         return
+    cur = service.product_currency(row["product_type"] or "residential")
     await wait.edit_text(
         "✅ <b>تمدید انجام شد</b>\n"
         f"➕ حجم اضافه‌شده: <b>{info['added_volume_gb']} GB</b>\n"
         f"📦 حجم کل: <b>{info['new_volume_gb']} GB</b>\n"
         f"⏳ انقضای جدید: {fmt_expiry(info['new_expiry_ms'])} (+{info['added_days']} روز)\n"
-        f"💵 مبلغ: <b>{info['price']:g} {service.currency}</b>"
+        f"💵 مبلغ: <b>{info['price']:g} {cur}</b>"
     )
     if message.from_user.id != cfg.admin_id:
         try:
@@ -406,7 +410,7 @@ async def renew_volume(message: Message, state: FSMContext, db: Database, servic
                 f"👤 کاربر: <code>{message.from_user.id}</code>\n"
                 f"🆔 سرویس: <code>#{config_id}</code>\n"
                 f"➕ حجم: <b>{info['added_volume_gb']} GB</b>\n"
-                f"💵 مبلغ: <b>{info['price']:g} {service.currency}</b> ({info['payer']})",
+                f"💵 مبلغ: <b>{info['price']:g} {cur}</b> ({info['payer']})",
             )
         except Exception:  # noqa: BLE001
             logger.warning("notify admin (renew) failed")

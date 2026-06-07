@@ -120,6 +120,8 @@ class Settings:
 
     # کیف پول و پرداخت
     wallet_currency: str = field(default_factory=lambda: _get("WALLET_CURRENCY", "تومان"))
+    # واحد قیمت رزیدنتال (دلار)
+    residential_currency: str = field(default_factory=lambda: _get("RESIDENTIAL_CURRENCY", "USD"))
     # نرخ تبدیل تومان به دلار/تتر (قابل ویرایش در ربات)
     toman_per_usd: float = field(default_factory=lambda: _get_float("TOMAN_PER_USD", 175000.0))
     nowpayments_api_key: str = field(default_factory=lambda: _get("NOWPAYMENTS_API_KEY"))

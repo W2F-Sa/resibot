@@ -49,8 +49,7 @@ def wallet_menu(*, topup_enabled: bool = True) -> InlineKeyboardMarkup:
 def partnership_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🌐 همکاری رزیدنتال", callback_data="partner:residential")],
-            [InlineKeyboardButton(text="🛡 همکاری V2Ray", callback_data="partner:v2ray")],
+            [InlineKeyboardButton(text="🛡 درخواست همکاری V2Ray", callback_data="partner:v2ray")],
         ]
     )
 
@@ -268,6 +267,7 @@ def admin_panel_menu(pending_count: int = 0) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=pending_label, callback_data="adm:requests")],
             [InlineKeyboardButton(text="👤 مدیریت کاربران/نقش‌ها", callback_data="adm:users")],
             [InlineKeyboardButton(text="💳 شارژ دستی کیف پول", callback_data="adm:credit")],
+            [InlineKeyboardButton(text="📣 پیام همگانی", callback_data="adm:broadcast")],
             [InlineKeyboardButton(text="💵 قیمت‌ها", callback_data="adm:prices")],
             [InlineKeyboardButton(text="⚙️ تنظیمات سرور", callback_data="adm:settings")],
         ]

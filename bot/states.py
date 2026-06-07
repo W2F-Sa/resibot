@@ -58,3 +58,4 @@ class AdminStates(StatesGroup):
     setrole_id = State()
     credit_id = State()
     credit_amount = State()
+    broadcast_text = State()

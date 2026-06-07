@@ -181,6 +181,16 @@ class Service:
     def currency(self) -> str:
         return self.cfg.wallet_currency
 
+    @property
+    def residential_currency(self) -> str:
+        return self.cfg.residential_currency
+
+    def product_currency(self, product: str) -> str:
+        """واحد پول هر محصول: رزیدنتال = دلار، V2Ray = تومان (کیف پول)."""
+        if product == PRODUCT_V2RAY:
+            return self.cfg.wallet_currency
+        return self.cfg.residential_currency
+
     def price_per_gb_for(self, role: str, product: str) -> float:
         """قیمت هر گیگ بر اساس نقش و نوع محصول."""
         if product == PRODUCT_V2RAY:
@@ -596,8 +606,8 @@ class Service:
         pending = self.db.list_pending_requests()
         total_users = self.db.count_users()
         total_volume = sum(int(c["volume_gb"]) for c in configs)
-        total_amount = round(sum(float(c["price"] or 0) for c in configs), 2)
-        cur = self.currency
+        res_amount = round(sum(float(c["price"] or 0) for c in configs if (c["product_type"] or "residential") != "v2ray"), 2)
+        v2_amount = round(sum(float(c["price"] or 0) for c in configs if (c["product_type"] or "residential") == "v2ray"), 2)
         lines = [
             "📊 <b>گزارش کلی</b>",
             f"• کاربران: <b>{total_users}</b>",
@@ -605,20 +615,20 @@ class Service:
             f"• درخواست همکاری در انتظار: <b>{len(pending)}</b>",
             f"• کانفیگ‌های فعال: <b>{len(configs)}</b>",
             f"• مجموع حجم فروخته‌شده: <b>{total_volume} GB</b>",
-            f"• مجموع مبلغ سفارش‌ها: <b>{total_amount:g} {cur}</b>",
+            f"• مجموع فروش رزیدنتال: <b>{res_amount:g} {self.residential_currency}</b>",
+            f"• مجموع فروش V2Ray: <b>{v2_amount:g} {self.currency}</b>",
         ]
         # تجمیع به ازای هر مالک
         per_owner: dict[int, dict[str, float]] = {}
         for c in configs:
-            d = per_owner.setdefault(int(c["owner_tg_id"]), {"count": 0, "gb": 0, "amt": 0.0})
+            d = per_owner.setdefault(int(c["owner_tg_id"]), {"count": 0, "gb": 0})
             d["count"] += 1
             d["gb"] += int(c["volume_gb"])
-            d["amt"] += float(c["price"] or 0)
         if per_owner:
             lines.append("\n👥 <b>به تفکیک مالک:</b>")
             for tg_id, d in sorted(per_owner.items(), key=lambda x: -x[1]["gb"])[:25]:
                 lines.append(
-                    f"• <code>{tg_id}</code> — {int(d['count'])} کانفیگ، {int(d['gb'])} GB، {round(d['amt'],2):g} {cur}"
+                    f"• <code>{tg_id}</code> — {int(d['count'])} کانفیگ، {int(d['gb'])} GB"
                 )
         return "\n".join(lines)
 
@@ -638,30 +648,36 @@ class Service:
     #  خرید/تمدید با درنظرگرفتن نقش و کیف پول
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _payer_for(role: str) -> str:
+    def _payer_for(role: str, product: str = PRODUCT_RESIDENTIAL) -> str:
+        """نحوه‌ی پرداخت بر اساس نقش و محصول.
+
+        - ادمین: رایگان (مالک ربات)
+        - رزیدنتال: فقط همکار رزیدنتال (پس‌پرداخت)؛ بقیه مجاز نیستند.
+        - V2Ray: از کیف پول (پیش‌پرداخت) برای همه.
+        """
         if role == ROLE_ADMIN:
-            return "admin"          # رایگان (مالک ربات)
+            return "admin"
+        if product == PRODUCT_V2RAY:
+            return "wallet"
+        # residential
         if role == ROLE_RESIDENTIAL_RESELLER:
-            return "postpaid"       # پس‌پرداخت؛ تسویه با ادمین
-        return "wallet"             # پیش‌پرداخت از کیف پول
+            return "postpaid"
+        return "denied"
 
     async def purchase_residential(
         self, buyer_tg_id: int, role: str, location: ProxyLocation, volume_gb: int, life: Optional[int]
     ) -> ProvisionResult:
-        price = self.quote(role, PRODUCT_RESIDENTIAL, volume_gb)
-        payer = self._payer_for(role)
-        if payer == "wallet":
-            if not self.db.try_deduct_balance(buyer_tg_id, price):
-                raise InsufficientBalance(price, self.db.get_balance(buyer_tg_id))
-        try:
-            result = await self.provision_config(
-                buyer_tg_id, location, volume_gb, life,
-                product_type=PRODUCT_RESIDENTIAL, price=price, payer=payer,
+        payer = self._payer_for(role, PRODUCT_RESIDENTIAL)
+        if payer == "denied":
+            raise PermissionError(
+                "کانفیگ رزیدنتال فقط برای همکاران رزیدنتال است. برای همکاری با ادمین هماهنگ کنید."
             )
-        except Exception:
-            if payer == "wallet":
-                self.db.add_balance(buyer_tg_id, price)  # بازگشت وجه در صورت خطا
-            raise
+        price = self.quote(role, PRODUCT_RESIDENTIAL, volume_gb)
+        # رزیدنتال از کیف پول کسر نمی‌شود (پس‌پرداخت/رایگان)
+        result = await self.provision_config(
+            buyer_tg_id, location, volume_gb, life,
+            product_type=PRODUCT_RESIDENTIAL, price=price, payer=payer,
+        )
         return result
 
     async def purchase_renew(
@@ -674,7 +690,9 @@ class Service:
             raise ValueError(f"حداقل حجم تمدید {self.renew_min_volume_gb} گیگابایت است.")
         product = row["product_type"] or PRODUCT_RESIDENTIAL
         price = self.quote(role, product, add_volume_gb)
-        payer = self._payer_for(role)
+        payer = self._payer_for(role, product)
+        if payer == "denied":
+            raise PermissionError("اجازه‌ی تمدید این سرویس را ندارید.")
         if payer == "wallet":
             if not self.db.try_deduct_balance(buyer_tg_id, price):
                 raise InsufficientBalance(price, self.db.get_balance(buyer_tg_id))

@@ -2,6 +2,7 @@
 قیمت‌ها و تنظیمات سرور."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from html import escape
 
@@ -274,20 +275,57 @@ async def credit_amount(message: Message, state: FSMContext, db: Database, servi
 
 
 # ====================================================================== #
+#  پیام همگانی
+# ====================================================================== #
+@router.callback_query(F.data == "adm:broadcast")
+async def adm_broadcast(call: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminStates.broadcast_text)
+    await call.answer()
+    await call.message.answer(
+        "📣 متن پیام همگانی را بفرستید.\n"
+        "این پیام برای همه‌ی کاربران ربات ارسال می‌شود. (برای لغو /start بزنید)"
+    )
+
+
+@router.message(AdminStates.broadcast_text)
+async def do_broadcast(message: Message, state: FSMContext, db: Database) -> None:
+    await state.clear()
+    text = message.html_text if message.text else (message.caption or "")
+    if not text:
+        await message.answer("⛔️ متن خالی است.")
+        return
+    user_ids = db.all_user_ids()
+    await message.answer(f"⏳ در حال ارسال به <b>{len(user_ids)}</b> کاربر...")
+    ok = 0
+    fail = 0
+    for i, uid in enumerate(user_ids):
+        try:
+            await message.bot.send_message(uid, text)
+            ok += 1
+        except Exception:  # noqa: BLE001
+            fail += 1
+        # جلوگیری از محدودیت نرخ تلگرام
+        if (i + 1) % 25 == 0:
+            await asyncio.sleep(1)
+    await message.answer(f"✅ ارسال شد.\n✔️ موفق: <b>{ok}</b> | ✖️ ناموفق: <b>{fail}</b>")
+
+
+# ====================================================================== #
 #  قیمت‌ها و تنظیمات
 # ====================================================================== #
 @router.callback_query(F.data == "adm:prices")
 async def adm_prices(call: CallbackQuery, service: Service) -> None:
     await call.answer()
-    cur = service.currency
+    usd = service.residential_currency
+    tmn = service.currency
     text = (
         "💵 <b>قیمت‌ها (هر گیگابایت)</b>\n"
-        f"• رزیدنتال عادی: <b>{service.price_per_gb:g} {cur}</b>\n"
-        f"• رزیدنتال همکار: <b>{service.reseller_price_per_gb:g} {cur}</b>\n"
-        f"• V2Ray عادی: <b>{service.v2ray_price_per_gb:g} {cur}</b>\n"
-        f"• V2Ray همکار: <b>{service.v2ray_reseller_price_per_gb:g} {cur}</b>\n"
-        f"• حداقل موجودی همکار v2ray: <b>{service.reseller_min_balance:g} {cur}</b>\n"
-        f"• نرخ تتر/تومان: <b>{service.toman_per_usd:g} {cur}</b> به ازای هر دلار\n\n"
+        f"• رزیدنتال عادی: <b>{service.price_per_gb:g} {usd}</b>\n"
+        f"• رزیدنتال همکار: <b>{service.reseller_price_per_gb:g} {usd}</b>\n"
+        f"• V2Ray عادی: <b>{service.v2ray_price_per_gb:g} {tmn}</b>\n"
+        f"• V2Ray همکار: <b>{service.v2ray_reseller_price_per_gb:g} {tmn}</b>\n"
+        f"• حداقل موجودی همکار v2ray: <b>{service.reseller_min_balance:g} {tmn}</b>\n"
+        f"• نرخ تتر/تومان: <b>{service.toman_per_usd:g} {tmn}</b> به ازای هر دلار\n\n"
         "برای تغییر یکی را انتخاب کنید:"
     )
     await call.message.answer(text, reply_markup=prices_menu())

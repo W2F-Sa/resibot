@@ -105,7 +105,10 @@ async def partnership_root(message: Message, state: FSMContext, db: Database, ro
         await message.answer("⏳ یک درخواست همکاری در انتظار بررسی دارید.")
         return
     await message.answer(
-        "🤝 <b>درخواست همکاری</b>\nنوع همکاری را انتخاب کنید:",
+        "🤝 <b>درخواست همکاری</b>\n\n"
+        "• همکاری <b>رزیدنتال</b> فقط توسط ادمین تعیین می‌شود (قابل درخواست نیست).\n"
+        "• همکاری <b>V2Ray</b> با پیش‌پرداخت و داشتن حداقل موجودی امکان‌پذیر است.\n\n"
+        "برای درخواست همکاری V2Ray دکمه‌ی زیر را بزنید:",
         reply_markup=partnership_menu(),
     )
 
@@ -119,8 +122,9 @@ async def partnership_choose(call: CallbackQuery, state: FSMContext, db: Databas
         await call.answer("یک درخواست در انتظار دارید.", show_alert=True)
         return
     ptype = call.data.split(":", 1)[1]
-    if ptype not in ("residential", "v2ray"):
-        await call.answer("نامعتبر", show_alert=True)
+    if ptype != "v2ray":
+        # همکاری رزیدنتال فقط توسط ادمین تعیین می‌شود؛ قابل درخواست نیست.
+        await call.answer("همکاری رزیدنتال فقط توسط ادمین تعیین می‌شود.", show_alert=True)
         return
     await state.set_state(PartnershipStates.entering_description)
     await state.update_data(ptype=ptype)
