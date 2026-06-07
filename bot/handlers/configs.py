@@ -22,7 +22,7 @@ from ..keyboards import (
     options_keyboard,
 )
 from ..proxy import normalize_code, validate_code
-from ..service import Service
+from ..service import InsufficientBalance, Service
 from ..states import ChangeLocationStates, ConfigStates
 from ..utils import config_summary, fmt_bytes, fmt_expiry
 
@@ -52,7 +52,7 @@ def _list_rows(uid: int, cfg: Settings, db: Database):
 # ---------------------------------------------------------------------- #
 #  لیست کانفیگ‌ها (سطح ۱)
 # ---------------------------------------------------------------------- #
-@router.message(F.text == "🧾 کانفیگ‌های من")
+@router.message(F.text == "🧾 سرویس‌های من")
 async def my_configs(message: Message, db: Database, cfg: Settings) -> None:
     rows, show_owner = _list_rows(message.from_user.id, cfg, db)
     if not rows:
@@ -329,6 +329,87 @@ async def city_set(call: CallbackQuery, service: Service, db: Database, cfg: Set
         f"✅ شهر تغییر کرد به <b>{locations.prettify(loc.city) or 'تصادفی'}</b>.\n"
         f"🔑 session: <code>{loc.session}</code>"
     )
+
+
+# ====================================================================== #
+#  تمدید / افزایش حجم
+# ====================================================================== #
+@router.callback_query(F.data.startswith("cfg_renew:"))
+async def renew_start(call: CallbackQuery, state: FSMContext, db: Database, service: Service, cfg: Settings) -> None:
+    config_id = int(call.data.split(":", 1)[1])
+    row = _access_or_none(config_id, call.from_user.id, cfg, db)
+    if not row:
+        await call.answer("دسترسی ندارید یا سرویس یافت نشد.", show_alert=True)
+        return
+    await call.answer()
+    await state.set_state(ConfigStates.entering_renew_volume)
+    await state.update_data(config_id=config_id)
+    await call.message.answer(
+        "♻️ <b>تمدید سرویس</b>\n"
+        f"چقدر حجم اضافه می‌کنید؟ (به گیگابایت)\n"
+        f"• حداقل تمدید: <b>{service.renew_min_volume_gb} GB</b>\n"
+        f"• با هر تمدید <b>{cfg.config_duration_days} روز</b> به اعتبار اضافه می‌شود."
+    )
+
+
+@router.message(ConfigStates.entering_renew_volume)
+async def renew_volume(message: Message, state: FSMContext, db: Database, service: Service, cfg: Settings, role: str) -> None:
+    text = (message.text or "").strip()
+    if not text.isdigit():
+        await message.answer("⛔️ فقط یک عدد صحیح (گیگابایت) بفرستید:")
+        return
+    add_vol = int(text)
+    if add_vol < service.renew_min_volume_gb:
+        await message.answer(f"⛔️ حداقل حجم تمدید <b>{service.renew_min_volume_gb} GB</b> است.")
+        return
+    if add_vol > 100000:
+        await message.answer("⛔️ حجم بیش از حد بزرگ است.")
+        return
+    data = await state.get_data()
+    await state.clear()
+    config_id = int(data.get("config_id", 0))
+    row = _access_or_none(config_id, message.from_user.id, cfg, db)
+    if not row:
+        await message.answer("⛔️ دسترسی ندارید یا سرویس یافت نشد.")
+        return
+    wait = await message.answer("⏳ در حال تمدید...")
+    try:
+        info = await service.purchase_renew(message.from_user.id, role, config_id, add_vol)
+    except InsufficientBalance as exc:
+        from ..keyboards import topup_after_insufficient_keyboard
+        await wait.edit_text(
+            f"⛔️ موجودی کافی نیست.\n"
+            f"💵 مبلغ لازم: <b>{exc.needed:g} {service.currency}</b>\n"
+            f"💰 موجودی شما: <b>{exc.balance:g} {service.currency}</b>",
+            reply_markup=topup_after_insufficient_keyboard(),
+        )
+        return
+    except ValueError as exc:
+        await wait.edit_text(f"⛔️ {exc}")
+        return
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("renew failed")
+        await wait.edit_text(f"❌ خطا در تمدید:\n<code>{exc}</code>")
+        return
+    await wait.edit_text(
+        "✅ <b>تمدید انجام شد</b>\n"
+        f"➕ حجم اضافه‌شده: <b>{info['added_volume_gb']} GB</b>\n"
+        f"📦 حجم کل: <b>{info['new_volume_gb']} GB</b>\n"
+        f"⏳ انقضای جدید: {fmt_expiry(info['new_expiry_ms'])} (+{info['added_days']} روز)\n"
+        f"💵 مبلغ: <b>{info['price']:g} {service.currency}</b>"
+    )
+    if message.from_user.id != cfg.admin_id:
+        try:
+            await message.bot.send_message(
+                cfg.admin_id,
+                "♻️ <b>تمدید سرویس</b>\n"
+                f"👤 کاربر: <code>{message.from_user.id}</code>\n"
+                f"🆔 سرویس: <code>#{config_id}</code>\n"
+                f"➕ حجم: <b>{info['added_volume_gb']} GB</b>\n"
+                f"💵 مبلغ: <b>{info['price']:g} {service.currency}</b> ({info['payer']})",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("notify admin (renew) failed")
 
 
 # ====================================================================== #

@@ -140,3 +140,107 @@ def test_inbound_payload_serializable():
 def test_sub_link():
     assert build_sub_link("https://h.com:2096", "/sub/", "abc") == "https://h.com:2096/sub/abc"
     assert build_sub_link("https://h.com:2096/", "sub", "abc") == "https://h.com:2096/sub/abc"
+
+
+
+# --------------------------- NowPayments IPN --------------------------- #
+import hashlib as _hashlib
+import hmac as _hmac
+
+from bot.nowpayments import verify_ipn_signature, _sorted_json
+
+
+def _sign(payload, secret):
+    msg = _sorted_json(payload).encode()
+    return _hmac.new(secret.encode(), msg, _hashlib.sha512).hexdigest()
+
+
+def test_ipn_signature_valid():
+    payload = {"payment_status": "finished", "order_id": "w2f-1-abc", "price_amount": 10, "pay_currency": "btc"}
+    sig = _sign(payload, "secret-key")
+    assert verify_ipn_signature(payload, sig, "secret-key") is True
+
+
+def test_ipn_signature_invalid():
+    payload = {"payment_status": "finished", "order_id": "x"}
+    sig = _sign(payload, "secret-key")
+    # کلید اشتباه
+    assert verify_ipn_signature(payload, sig, "wrong-key") is False
+    # امضای دستکاری‌شده
+    assert verify_ipn_signature(payload, "deadbeef", "secret-key") is False
+    # ورودی خالی
+    assert verify_ipn_signature(payload, "", "secret-key") is False
+
+
+def test_ipn_sorted_json_is_compact_and_sorted():
+    assert _sorted_json({"b": 1, "a": 2}) == '{"a":2,"b":1}'
+
+
+# --------------------------- pricing / payer --------------------------- #
+import os as _os
+import tempfile as _tempfile
+
+from bot.config import Settings
+from bot.database import (
+    Database as _DB,
+    PRODUCT_RESIDENTIAL,
+    PRODUCT_V2RAY,
+    ROLE_ADMIN,
+    ROLE_RESIDENTIAL_RESELLER,
+    ROLE_USER,
+    ROLE_V2RAY_RESELLER,
+)
+from bot.service import Service
+
+
+def _make_service():
+    cfg = Settings()
+    cfg.price_per_gb = 3.0
+    cfg.reseller_price_per_gb = 2.0
+    cfg.v2ray_price_per_gb = 1.5
+    cfg.v2ray_reseller_price_per_gb = 1.0
+    db = _DB(_os.path.join(_tempfile.mkdtemp(), "t.db"))
+    svc = Service(cfg, db, None)
+    svc.seed_settings()
+    return svc, db
+
+
+def test_price_tiers():
+    svc, _ = _make_service()
+    assert svc.price_per_gb_for(ROLE_USER, PRODUCT_RESIDENTIAL) == 3.0
+    assert svc.price_per_gb_for(ROLE_RESIDENTIAL_RESELLER, PRODUCT_RESIDENTIAL) == 2.0
+    assert svc.price_per_gb_for(ROLE_V2RAY_RESELLER, PRODUCT_V2RAY) == 1.0
+    assert svc.price_per_gb_for(ROLE_USER, PRODUCT_V2RAY) == 1.5
+    assert svc.quote(ROLE_RESIDENTIAL_RESELLER, PRODUCT_RESIDENTIAL, 10) == 20.0
+
+
+def test_payer_for():
+    assert Service._payer_for(ROLE_ADMIN) == "admin"
+    assert Service._payer_for(ROLE_RESIDENTIAL_RESELLER) == "postpaid"
+    assert Service._payer_for(ROLE_V2RAY_RESELLER) == "wallet"
+    assert Service._payer_for(ROLE_USER) == "wallet"
+
+
+def test_wallet_atomic_deduct():
+    svc, db = _make_service()
+    db.add_balance(123, 50.0)
+    assert db.try_deduct_balance(123, 30.0) is True
+    assert db.get_balance(123) == 20.0
+    assert db.try_deduct_balance(123, 30.0) is False  # insufficient
+    assert db.get_balance(123) == 20.0
+
+
+def test_payment_credit_once():
+    svc, db = _make_service()
+    db.create_payment("ord-1", 7, 25.0, "USD")
+    first = db.credit_payment_once("ord-1")
+    assert first is not None
+    second = db.credit_payment_once("ord-1")
+    assert second is None  # idempotent
+
+
+def test_migration_preserves_and_adds():
+    # ساخت دیتابیس و افزودن نقش
+    svc, db = _make_service()
+    db.set_role(999, ROLE_RESIDENTIAL_RESELLER)
+    assert db.get_role(999) == ROLE_RESIDENTIAL_RESELLER

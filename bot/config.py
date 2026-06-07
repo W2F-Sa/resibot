@@ -98,13 +98,48 @@ class Settings:
     sub_path: str = field(default_factory=lambda: _get("SUB_PATH", "/sub/"))
     sub_secure: bool = field(default_factory=lambda: _get_bool("SUB_SECURE", True))
 
+    # برند
+    brand_name: str = field(default_factory=lambda: _get("BRAND_NAME", "w2f"))
+    brand_full: str = field(default_factory=lambda: _get("BRAND_FULL", "Way To Freedom"))
+
     # قوانین فروش
     min_volume_gb: int = field(default_factory=lambda: _get_int("MIN_VOLUME_GB", 5))
+    renew_min_volume_gb: int = field(default_factory=lambda: _get_int("RENEW_MIN_VOLUME_GB", 5))
     config_duration_days: int = field(default_factory=lambda: _get_int("CONFIG_DURATION_DAYS", 30))
+
+    # قیمت‌ها (به ازای هر گیگابایت) — واحد در WALLET_CURRENCY
+    # رزیدنتال: قیمت عادی (مشتری) و قیمت همکار (ارزان‌تر)
     price_per_gb: float = field(default_factory=lambda: _get_float("PRICE_PER_GB", 2.9))
+    reseller_price_per_gb: float = field(default_factory=lambda: _get_float("RESELLER_PRICE_PER_GB", 2.0))
+    # v2ray (پنل بعداً اضافه می‌شود؛ فعلاً جای‌گذاری)
+    v2ray_price_per_gb: float = field(default_factory=lambda: _get_float("V2RAY_PRICE_PER_GB", 1.5))
+    v2ray_reseller_price_per_gb: float = field(default_factory=lambda: _get_float("V2RAY_RESELLER_PRICE_PER_GB", 1.0))
+
+    # حداقل موجودی لازم برای همکار v2ray (پیش‌پرداخت)
+    reseller_min_balance: float = field(default_factory=lambda: _get_float("RESELLER_MIN_BALANCE", 5000000.0))
+
+    # کیف پول و پرداخت
+    wallet_currency: str = field(default_factory=lambda: _get("WALLET_CURRENCY", "تومان"))
+    # نرخ تبدیل تومان به دلار/تتر (قابل ویرایش در ربات)
+    toman_per_usd: float = field(default_factory=lambda: _get_float("TOMAN_PER_USD", 175000.0))
+    nowpayments_api_key: str = field(default_factory=lambda: _get("NOWPAYMENTS_API_KEY"))
+    nowpayments_ipn_secret: str = field(default_factory=lambda: _get("NOWPAYMENTS_IPN_SECRET"))
+    nowpayments_public_key: str = field(default_factory=lambda: _get("NOWPAYMENTS_PUBLIC_KEY"))
+    # ارز قیمت‌گذاری در NowPayments (فیات؛ مثل usd)
+    nowpayments_price_currency: str = field(default_factory=lambda: _get("NOWPAYMENTS_PRICE_CURRENCY", "usd"))
+    # ارز پرداخت پیش‌فرض (USDT روی ترون = usdttrc20)
+    nowpayments_pay_currency: str = field(default_factory=lambda: _get("NOWPAYMENTS_PAY_CURRENCY", "usdttrc20"))
+    # آدرس عمومی برای دریافت IPN (مثل https://example.com یا https://ip:port)
+    public_base_url: str = field(default_factory=lambda: _get("PUBLIC_BASE_URL").rstrip("/"))
+    ipn_host: str = field(default_factory=lambda: _get("IPN_HOST", "0.0.0.0"))
+    ipn_port: int = field(default_factory=lambda: _get_int("IPN_PORT", 8090))
 
     # دیتابیس
     db_path: str = field(default_factory=lambda: _get("DB_PATH", "data/resibot.db"))
+
+    @property
+    def nowpayments_enabled(self) -> bool:
+        return bool(self.nowpayments_api_key and self.nowpayments_ipn_secret and self.public_base_url)
 
     def db_full_path(self) -> Path:
         p = Path(self.db_path)

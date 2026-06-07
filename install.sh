@@ -118,10 +118,27 @@ if [[ "$RECONF" =~ ^[Yy]$ ]]; then
   ask SMARTPROXY_LIFE "مدت ماندگاری IP به دقیقه (1..1440)" "120"
 
   echo
-  bold "— قوانین فروش —"
+  bold "— قوانین فروش و قیمت‌ها —"
   ask MIN_VOLUME_GB "حداقل حجم خرید (گیگابایت)" "5"
-  ask PRICE_PER_GB "قیمت هر گیگابایت (دلار)" "2.9"
+  ask RENEW_MIN_VOLUME_GB "حداقل حجم تمدید (گیگابایت)" "5"
   ask CONFIG_DURATION_DAYS "مدت اعتبار هر کانفیگ (روز)" "30"
+  ask WALLET_CURRENCY "واحد پول کیف پول" "تومان"
+  ask TOMAN_PER_USD "نرخ هر دلار/تتر به تومان" "175000"
+  ask PRICE_PER_GB "قیمت رزیدنتال عادی (هر گیگ)" "2.9"
+  ask RESELLER_PRICE_PER_GB "قیمت رزیدنتال همکار (هر گیگ)" "2.0"
+  ask V2RAY_PRICE_PER_GB "قیمت V2Ray عادی (هر گیگ)" "1.5"
+  ask V2RAY_RESELLER_PRICE_PER_GB "قیمت V2Ray همکار (هر گیگ)" "1.0"
+  ask RESELLER_MIN_BALANCE "حداقل موجودی همکار v2ray" "5000000"
+
+  echo
+  bold "— درگاه پرداخت NowPayments (برای شارژ کیف پول) —"
+  echo "اگر فعلاً نمی‌خواهید، خالی بگذارید و Enter بزنید."
+  ask_secret NOWPAYMENTS_API_KEY "NowPayments API Key"
+  ask_secret NOWPAYMENTS_IPN_SECRET "NowPayments IPN Secret"
+  ask NOWPAYMENTS_PUBLIC_KEY "NowPayments Public Key (اختیاری)"
+  ask NOWPAYMENTS_PRICE_CURRENCY "ارز قیمت‌گذاری درگاه (مثل usd)" "usd"
+  ask PUBLIC_BASE_URL "آدرس عمومی برای IPN (مثل https://دامنه:8090)"
+  ask IPN_PORT "پورت سرور IPN" "8090"
 
   bold "==> نوشتن فایل .env"
   cat > "$ENV_FILE" <<EOF
@@ -156,9 +173,29 @@ SMARTPROXY_USER_BASE=${SMARTPROXY_USER_BASE}
 SMARTPROXY_PASSWORD=${SMARTPROXY_PASSWORD}
 SMARTPROXY_LIFE=${SMARTPROXY_LIFE}
 
+BRAND_NAME=w2f
+BRAND_FULL=Way To Freedom
+
 MIN_VOLUME_GB=${MIN_VOLUME_GB}
-PRICE_PER_GB=${PRICE_PER_GB}
+RENEW_MIN_VOLUME_GB=${RENEW_MIN_VOLUME_GB}
 CONFIG_DURATION_DAYS=${CONFIG_DURATION_DAYS}
+
+WALLET_CURRENCY=${WALLET_CURRENCY}
+TOMAN_PER_USD=${TOMAN_PER_USD}
+PRICE_PER_GB=${PRICE_PER_GB}
+RESELLER_PRICE_PER_GB=${RESELLER_PRICE_PER_GB}
+V2RAY_PRICE_PER_GB=${V2RAY_PRICE_PER_GB}
+V2RAY_RESELLER_PRICE_PER_GB=${V2RAY_RESELLER_PRICE_PER_GB}
+RESELLER_MIN_BALANCE=${RESELLER_MIN_BALANCE}
+
+NOWPAYMENTS_API_KEY=${NOWPAYMENTS_API_KEY}
+NOWPAYMENTS_IPN_SECRET=${NOWPAYMENTS_IPN_SECRET}
+NOWPAYMENTS_PUBLIC_KEY=${NOWPAYMENTS_PUBLIC_KEY}
+NOWPAYMENTS_PRICE_CURRENCY=${NOWPAYMENTS_PRICE_CURRENCY}
+NOWPAYMENTS_PAY_CURRENCY=usdttrc20
+PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
+IPN_HOST=0.0.0.0
+IPN_PORT=${IPN_PORT}
 
 DB_PATH=data/resibot.db
 EOF

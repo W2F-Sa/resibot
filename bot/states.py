@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class OrderStates(StatesGroup):
-    """مراحل ثبت سفارش جدید توسط نماینده."""
+    """مراحل ثبت سفارش (خرید سرویس)."""
     choosing_country = State()
     searching_country = State()  # جستجوی کشور با نام
     entering_country = State()   # ورود دستی کد کشور
@@ -14,11 +14,13 @@ class OrderStates(StatesGroup):
     choosing_life = State()      # انتخاب زمان تعویض IP
     entering_life = State()      # ورود دستی زمان تعویض IP
     entering_volume = State()
+    confirming = State()         # تأیید نهایی و پرداخت
 
 
 class ConfigStates(StatesGroup):
     """ویرایش مقادیر یک کانفیگ موجود."""
     entering_life = State()
+    entering_renew_volume = State()  # حجم تمدید
 
 
 class ChangeLocationStates(StatesGroup):
@@ -30,12 +32,29 @@ class ChangeLocationStates(StatesGroup):
     choosing_city = State()
 
 
+class WalletStates(StatesGroup):
+    """شارژ کیف پول."""
+    entering_amount = State()
+
+
+class PartnershipStates(StatesGroup):
+    """درخواست همکاری."""
+    entering_description = State()
+
+
 class AdminStates(StatesGroup):
     """ورودی‌های ادمین."""
-    add_reseller = State()
-    remove_reseller = State()
     set_server_ip = State()
     set_sni = State()
     set_host = State()
     set_min_volume = State()
+    set_renew_min_volume = State()
     set_price = State()
+    set_reseller_price = State()
+    set_v2ray_price = State()
+    set_v2ray_reseller_price = State()
+    set_reseller_min_balance = State()
+    set_toman_rate = State()
+    setrole_id = State()
+    credit_id = State()
+    credit_amount = State()

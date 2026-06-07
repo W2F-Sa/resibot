@@ -21,7 +21,14 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .config import Settings
-from .database import Database
+from .database import (
+    Database,
+    PRODUCT_RESIDENTIAL,
+    PRODUCT_V2RAY,
+    ROLE_ADMIN,
+    ROLE_RESIDENTIAL_RESELLER,
+    ROLE_V2RAY_RESELLER,
+)
 from .inbound import (
     InboundSpec,
     build_client,
@@ -44,7 +51,13 @@ S_SNI = "inbound_sni"
 S_HOST = "inbound_host"
 S_PATH = "inbound_path"
 S_MIN_VOLUME = "min_volume_gb"
+S_RENEW_MIN_VOLUME = "renew_min_volume_gb"
 S_PRICE = "price_per_gb"
+S_RESELLER_PRICE = "reseller_price_per_gb"
+S_V2RAY_PRICE = "v2ray_price_per_gb"
+S_V2RAY_RESELLER_PRICE = "v2ray_reseller_price_per_gb"
+S_RESELLER_MIN_BALANCE = "reseller_min_balance"
+S_TOMAN_PER_USD = "toman_per_usd"
 
 
 @dataclass
@@ -59,11 +72,19 @@ class ProvisionResult:
     price: float = 0.0
 
 
+class InsufficientBalance(Exception):
+    def __init__(self, needed: float, balance: float) -> None:
+        self.needed = needed
+        self.balance = balance
+        super().__init__("موجودی کافی نیست.")
+
+
 class Service:
-    def __init__(self, cfg: Settings, db: Database, panel: PanelClient) -> None:
+    def __init__(self, cfg: Settings, db: Database, panel: PanelClient, nowpayments: Any = None) -> None:
         self.cfg = cfg
         self.db = db
         self.panel = panel
+        self.nowpayments = nowpayments
         self._xray_lock = asyncio.Lock()
         self._panel_settings_cache: Optional[dict[str, Any]] = None
 
@@ -77,7 +98,13 @@ class Service:
         self.db.seed_setting(S_HOST, self.cfg.inbound_host)
         self.db.seed_setting(S_PATH, self.cfg.inbound_path)
         self.db.seed_setting(S_MIN_VOLUME, str(self.cfg.min_volume_gb))
+        self.db.seed_setting(S_RENEW_MIN_VOLUME, str(self.cfg.renew_min_volume_gb))
         self.db.seed_setting(S_PRICE, str(self.cfg.price_per_gb))
+        self.db.seed_setting(S_RESELLER_PRICE, str(self.cfg.reseller_price_per_gb))
+        self.db.seed_setting(S_V2RAY_PRICE, str(self.cfg.v2ray_price_per_gb))
+        self.db.seed_setting(S_V2RAY_RESELLER_PRICE, str(self.cfg.v2ray_reseller_price_per_gb))
+        self.db.seed_setting(S_RESELLER_MIN_BALANCE, str(self.cfg.reseller_min_balance))
+        self.db.seed_setting(S_TOMAN_PER_USD, str(self.cfg.toman_per_usd))
 
     @property
     def server_ip(self) -> str:
@@ -110,6 +137,63 @@ class Service:
             return float(raw)
         except (TypeError, ValueError):
             return self.cfg.price_per_gb
+
+    def _fsetting(self, key: str, default: float) -> float:
+        raw = self.db.get_setting(key, str(default))
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+
+    def _isetting(self, key: str, default: int) -> int:
+        raw = self.db.get_setting(key, str(default))
+        try:
+            return int(float(raw))
+        except (TypeError, ValueError):
+            return default
+
+    @property
+    def reseller_price_per_gb(self) -> float:
+        return self._fsetting(S_RESELLER_PRICE, self.cfg.reseller_price_per_gb)
+
+    @property
+    def v2ray_price_per_gb(self) -> float:
+        return self._fsetting(S_V2RAY_PRICE, self.cfg.v2ray_price_per_gb)
+
+    @property
+    def v2ray_reseller_price_per_gb(self) -> float:
+        return self._fsetting(S_V2RAY_RESELLER_PRICE, self.cfg.v2ray_reseller_price_per_gb)
+
+    @property
+    def reseller_min_balance(self) -> float:
+        return self._fsetting(S_RESELLER_MIN_BALANCE, self.cfg.reseller_min_balance)
+
+    @property
+    def toman_per_usd(self) -> float:
+        rate = self._fsetting(S_TOMAN_PER_USD, self.cfg.toman_per_usd)
+        return rate if rate > 0 else self.cfg.toman_per_usd
+
+    @property
+    def renew_min_volume_gb(self) -> int:
+        return self._isetting(S_RENEW_MIN_VOLUME, self.cfg.renew_min_volume_gb)
+
+    @property
+    def currency(self) -> str:
+        return self.cfg.wallet_currency
+
+    def price_per_gb_for(self, role: str, product: str) -> float:
+        """قیمت هر گیگ بر اساس نقش و نوع محصول."""
+        if product == PRODUCT_V2RAY:
+            if role == ROLE_V2RAY_RESELLER:
+                return self.v2ray_reseller_price_per_gb
+            return self.v2ray_price_per_gb
+        # residential
+        if role == ROLE_RESIDENTIAL_RESELLER:
+            return self.reseller_price_per_gb
+        return self.price_per_gb
+
+    def quote(self, role: str, product: str, volume_gb: int) -> float:
+        return round(self.price_per_gb_for(role, product) * int(volume_gb), 2)
 
     def total_price(self, volume_gb: int) -> float:
         return round(self.price_per_gb * int(volume_gb), 2)
@@ -223,6 +307,10 @@ class Service:
         location: ProxyLocation,
         volume_gb: int,
         life: Optional[int] = None,
+        *,
+        product_type: str = PRODUCT_RESIDENTIAL,
+        price: float = 0.0,
+        payer: str = "",
     ) -> ProvisionResult:
         min_gb = self.min_volume_gb
         if volume_gb < min_gb:
@@ -301,6 +389,9 @@ class Service:
                 "session": session,
                 "created_at": int(time.time()),
                 "active": 1,
+                "product_type": product_type,
+                "price": float(price),
+                "payer": payer,
             }
         )
 
@@ -317,7 +408,7 @@ class Service:
             volume_gb=int(volume_gb),
             expiry_ms=expiry_ms,
             location=loc,
-            price=self.total_price(volume_gb),
+            price=float(price) if price else self.total_price(volume_gb),
         )
 
     async def _find_inbound_id_by_port(self, port: int) -> int:
@@ -413,6 +504,39 @@ class Service:
         return life_val
 
     # ------------------------------------------------------------------ #
+    #  تمدید کانفیگ (افزودن حجم + افزودن مدت)
+    # ------------------------------------------------------------------ #
+    async def renew_config(
+        self, config_id: int, add_volume_gb: int, *, price: float = 0.0
+    ) -> dict[str, Any]:
+        row = self.db.get_config(config_id)
+        if not row:
+            raise ValueError("کانفیگ پیدا نشد.")
+        add_volume_gb = int(add_volume_gb)
+        if add_volume_gb < self.renew_min_volume_gb:
+            raise ValueError(f"حداقل حجم تمدید {self.renew_min_volume_gb} گیگابایت است.")
+
+        new_volume_gb = int(row["volume_gb"]) + add_volume_gb
+        now_ms = int(time.time() * 1000)
+        base_ms = max(now_ms, int(row["expiry_ms"] or 0))
+        new_expiry_ms = base_ms + self.cfg.config_duration_days * 86400 * 1000
+        new_total_bytes = new_volume_gb * GIB
+
+        client = build_client(
+            row["client_uuid"], row["client_email"], row["sub_id"],
+            new_total_bytes, new_expiry_ms,
+        )
+        await self.panel.update_client(row["inbound_id"], row["client_uuid"], client)
+        self.db.renew_config(config_id, new_volume_gb, new_expiry_ms, price)
+        return {
+            "new_volume_gb": new_volume_gb,
+            "added_volume_gb": add_volume_gb,
+            "new_expiry_ms": new_expiry_ms,
+            "added_days": self.cfg.config_duration_days,
+            "price": float(price),
+        }
+
+    # ------------------------------------------------------------------ #
     #  حذف کانفیگ
     # ------------------------------------------------------------------ #
     async def delete_config(self, config_id: int) -> None:
@@ -462,30 +586,39 @@ class Service:
         return obj or {}
 
     def build_report(self) -> str:
+        from .database import (
+            ROLE_RESIDENTIAL_RESELLER,
+            ROLE_V2RAY_RESELLER,
+        )
         configs = self.db.list_all_configs()
-        resellers = self.db.list_resellers()
+        res_resellers = self.db.list_users_by_role(ROLE_RESIDENTIAL_RESELLER)
+        v2_resellers = self.db.list_users_by_role(ROLE_V2RAY_RESELLER)
+        pending = self.db.list_pending_requests()
+        total_users = self.db.count_users()
         total_volume = sum(int(c["volume_gb"]) for c in configs)
-        total_amount = round(self.price_per_gb * total_volume, 2)
-        # تجمیع به ازای هر نماینده
-        per_owner: dict[int, dict[str, int]] = {}
-        for c in configs:
-            d = per_owner.setdefault(int(c["owner_tg_id"]), {"count": 0, "gb": 0})
-            d["count"] += 1
-            d["gb"] += int(c["volume_gb"])
+        total_amount = round(sum(float(c["price"] or 0) for c in configs), 2)
+        cur = self.currency
         lines = [
             "📊 <b>گزارش کلی</b>",
-            f"• تعداد نماینده‌ها: <b>{len(resellers)}</b>",
-            f"• تعداد کانفیگ‌های فعال: <b>{len(configs)}</b>",
+            f"• کاربران: <b>{total_users}</b>",
+            f"• همکار رزیدنتال: <b>{len(res_resellers)}</b> | همکار v2ray: <b>{len(v2_resellers)}</b>",
+            f"• درخواست همکاری در انتظار: <b>{len(pending)}</b>",
+            f"• کانفیگ‌های فعال: <b>{len(configs)}</b>",
             f"• مجموع حجم فروخته‌شده: <b>{total_volume} GB</b>",
-            f"• قیمت هر گیگ: <b>${self.price_per_gb:g}</b>",
-            f"• مجموع مبلغ سفارشات: <b>${total_amount:g}</b>",
+            f"• مجموع مبلغ سفارش‌ها: <b>{total_amount:g} {cur}</b>",
         ]
+        # تجمیع به ازای هر مالک
+        per_owner: dict[int, dict[str, float]] = {}
+        for c in configs:
+            d = per_owner.setdefault(int(c["owner_tg_id"]), {"count": 0, "gb": 0, "amt": 0.0})
+            d["count"] += 1
+            d["gb"] += int(c["volume_gb"])
+            d["amt"] += float(c["price"] or 0)
         if per_owner:
-            lines.append("\n👥 <b>به تفکیک نماینده:</b>")
-            for tg_id, d in sorted(per_owner.items(), key=lambda x: -x[1]["gb"]):
-                amt = round(self.price_per_gb * d["gb"], 2)
+            lines.append("\n👥 <b>به تفکیک مالک:</b>")
+            for tg_id, d in sorted(per_owner.items(), key=lambda x: -x[1]["gb"])[:25]:
                 lines.append(
-                    f"• <code>{tg_id}</code> — {d['count']} کانفیگ، {d['gb']} GB، ${amt:g}"
+                    f"• <code>{tg_id}</code> — {int(d['count'])} کانفیگ، {int(d['gb'])} GB، {round(d['amt'],2):g} {cur}"
                 )
         return "\n".join(lines)
 
@@ -500,3 +633,94 @@ class Service:
         remark = f"resibot-{row['owner_tg_id']}-{row['port']}"
         vless_links = [self._vless_link(row["client_uuid"], row["port"], remark)]
         return sub_link, vless_links
+
+    # ------------------------------------------------------------------ #
+    #  خرید/تمدید با درنظرگرفتن نقش و کیف پول
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _payer_for(role: str) -> str:
+        if role == ROLE_ADMIN:
+            return "admin"          # رایگان (مالک ربات)
+        if role == ROLE_RESIDENTIAL_RESELLER:
+            return "postpaid"       # پس‌پرداخت؛ تسویه با ادمین
+        return "wallet"             # پیش‌پرداخت از کیف پول
+
+    async def purchase_residential(
+        self, buyer_tg_id: int, role: str, location: ProxyLocation, volume_gb: int, life: Optional[int]
+    ) -> ProvisionResult:
+        price = self.quote(role, PRODUCT_RESIDENTIAL, volume_gb)
+        payer = self._payer_for(role)
+        if payer == "wallet":
+            if not self.db.try_deduct_balance(buyer_tg_id, price):
+                raise InsufficientBalance(price, self.db.get_balance(buyer_tg_id))
+        try:
+            result = await self.provision_config(
+                buyer_tg_id, location, volume_gb, life,
+                product_type=PRODUCT_RESIDENTIAL, price=price, payer=payer,
+            )
+        except Exception:
+            if payer == "wallet":
+                self.db.add_balance(buyer_tg_id, price)  # بازگشت وجه در صورت خطا
+            raise
+        return result
+
+    async def purchase_renew(
+        self, buyer_tg_id: int, role: str, config_id: int, add_volume_gb: int
+    ) -> dict[str, Any]:
+        row = self.db.get_config(config_id)
+        if not row:
+            raise ValueError("کانفیگ پیدا نشد.")
+        if add_volume_gb < self.renew_min_volume_gb:
+            raise ValueError(f"حداقل حجم تمدید {self.renew_min_volume_gb} گیگابایت است.")
+        product = row["product_type"] or PRODUCT_RESIDENTIAL
+        price = self.quote(role, product, add_volume_gb)
+        payer = self._payer_for(role)
+        if payer == "wallet":
+            if not self.db.try_deduct_balance(buyer_tg_id, price):
+                raise InsufficientBalance(price, self.db.get_balance(buyer_tg_id))
+        try:
+            info = await self.renew_config(config_id, add_volume_gb, price=price)
+        except Exception:
+            if payer == "wallet":
+                self.db.add_balance(buyer_tg_id, price)
+            raise
+        info["payer"] = payer
+        return info
+
+    # ------------------------------------------------------------------ #
+    #  شارژ کیف پول از طریق NowPayments
+    # ------------------------------------------------------------------ #
+    async def create_wallet_topup(self, tg_id: int, amount: float) -> dict[str, Any]:
+        """شارژ کیف پول: مبلغ به تومان گرفته می‌شود و خودکار به USDT (ترون) تبدیل
+        و فاکتور NowPayments ساخته می‌شود."""
+        if self.nowpayments is None or not self.cfg.nowpayments_enabled:
+            raise ValueError("درگاه پرداخت پیکربندی نشده است.")
+        if amount <= 0:
+            raise ValueError("مبلغ نامعتبر است.")
+        usd_amount = round(amount / self.toman_per_usd, 2)
+        if usd_amount <= 0:
+            raise ValueError("مبلغ خیلی کم است.")
+        order_id = f"{self.cfg.brand_name}-{tg_id}-{secrets.token_hex(5)}"
+        # مبلغ ذخیره‌شده همان تومانی است که به کیف پول اضافه می‌شود
+        self.db.create_payment(order_id, tg_id, amount, self.cfg.wallet_currency)
+        ipn_url = self.cfg.public_base_url + "/nowpayments/ipn"
+        try:
+            inv = await self.nowpayments.create_invoice(
+                price_amount=usd_amount,
+                price_currency=self.cfg.nowpayments_price_currency,
+                order_id=order_id,
+                order_description=f"Wallet top-up for {tg_id} ({self.cfg.brand_full})",
+                ipn_callback_url=ipn_url,
+                pay_currency=self.cfg.nowpayments_pay_currency,
+            )
+        except Exception:
+            self.db.set_payment_status(order_id, "failed")
+            raise
+        self.db.set_payment_status(order_id, "waiting", invoice_id=str(inv.get("id") or ""))
+        return {
+            "order_id": order_id,
+            "invoice_url": inv.get("invoice_url"),
+            "amount": amount,
+            "usd_amount": usd_amount,
+            "pay_currency": self.cfg.nowpayments_pay_currency,
+        }

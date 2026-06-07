@@ -10,9 +10,21 @@ from aiogram.types import CallbackQuery, Message
 
 from .. import countries, locations
 from ..config import Settings
-from ..keyboards import country_keyboard, country_results_keyboard, life_keyboard, options_keyboard
+from ..database import (
+    PRODUCT_RESIDENTIAL,
+    ROLE_ADMIN,
+    ROLE_RESIDENTIAL_RESELLER,
+)
+from ..keyboards import (
+    confirm_purchase_keyboard,
+    country_keyboard,
+    country_results_keyboard,
+    life_keyboard,
+    options_keyboard,
+    topup_after_insufficient_keyboard,
+)
 from ..proxy import ProxyLocation, normalize_code, validate_code
-from ..service import Service
+from ..service import InsufficientBalance, Service
 from ..states import OrderStates
 from ..utils import provision_message
 
@@ -21,16 +33,35 @@ router = Router(name="order")
 
 
 # ---------------------------------------------------------------------- #
-#  شروع سفارش
+#  شروع سفارش از منوی محصولات
 # ---------------------------------------------------------------------- #
-@router.message(F.text == "🛒 سفارش جدید")
-async def order_start(message: Message, state: FSMContext) -> None:
+@router.callback_query(F.data == "buy:residential")
+async def buy_residential(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(OrderStates.choosing_country)
-    await message.answer(
+    await state.update_data(product=PRODUCT_RESIDENTIAL)
+    await call.answer()
+    await call.message.answer(
         "🌍 لطفاً کشور (لوکیشن) موردنظر را انتخاب کنید:",
         reply_markup=country_keyboard("ord_country"),
     )
+
+
+@router.callback_query(F.data == "buy:v2ray")
+async def buy_v2ray(call: CallbackQuery) -> None:
+    await call.answer()
+    await call.message.answer(
+        "🛡 <b>کانفیگ V2Ray (عادی)</b>\n\n"
+        "این بخش به‌زودی فعال می‌شود. 🚧\n"
+        "پنل V2Ray در حال اتصال است."
+    )
+
+
+@router.callback_query(F.data == "ord_cancel")
+async def order_cancel(call: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await call.answer("لغو شد.")
+    await call.message.edit_text("❌ سفارش لغو شد.")
 
 
 # ---------------------------------------------------------------------- #
@@ -175,17 +206,15 @@ async def _ask_volume(message: Message, state: FSMContext, service: Service) -> 
     await message.answer(
         f"📦 حجم موردنظر را به گیگابایت وارد کنید:\n"
         f"• حداقل خرید: <b>{service.min_volume_gb} GB</b> (سقف ندارد)\n"
-        f"• قیمت هر گیگ: <b>${service.price_per_gb:g}</b>\n"
-        f"• مدت اعتبار: <b>{service.cfg.config_duration_days} روز</b>\n\n"
-        "💡 نیازی به پرداخت نیست؛ تسویه با ادمین انجام می‌شود."
+        f"• مدت اعتبار: <b>{service.cfg.config_duration_days} روز</b>"
     )
 
 
 # ---------------------------------------------------------------------- #
-#  حجم و ساخت کانفیگ
+#  حجم → تأیید (با قیمت بر اساس نقش)
 # ---------------------------------------------------------------------- #
 @router.message(OrderStates.entering_volume)
-async def order_volume(message: Message, state: FSMContext, service: Service, cfg: Settings) -> None:
+async def order_volume(message: Message, state: FSMContext, service: Service, role: str) -> None:
     text = (message.text or "").strip()
     if not text.isdigit():
         await message.answer("⛔️ لطفاً فقط یک عدد صحیح (گیگابایت) بفرستید:")
@@ -196,9 +225,59 @@ async def order_volume(message: Message, state: FSMContext, service: Service, cf
             f"⛔️ حداقل حجم خرید <b>{service.min_volume_gb} GB</b> است. عدد بزرگتری بفرستید:"
         )
         return
+    if volume > 100000:
+        await message.answer("⛔️ حجم بیش از حد بزرگ است.")
+        return
 
     data = await state.get_data()
+    product = data.get("product", PRODUCT_RESIDENTIAL)
+    await state.update_data(volume=volume)
+    await state.set_state(OrderStates.confirming)
+
+    price = service.quote(role, product, volume)
+    payer = service._payer_for(role)
+    loc_txt = _loc_text(data)
+    life = data.get("life", None)
+    life_txt = "بدون تعویض خودکار" if not life else f"هر {life} دقیقه"
+
+    if payer == "postpaid":
+        pay_line = "💳 پرداخت: <b>پس‌پرداخت</b> (تسویه با ادمین)"
+    elif payer == "admin":
+        pay_line = "💳 پرداخت: <b>رایگان (ادمین)</b>"
+    else:
+        bal = service.db.get_balance(message.from_user.id)
+        pay_line = f"💳 پرداخت: از کیف پول | موجودی شما: <b>{bal:g} {service.currency}</b>"
+
+    await message.answer(
+        "🧾 <b>خلاصه‌ی سفارش</b>\n\n"
+        f"🌍 لوکیشن: {loc_txt}\n"
+        f"⏱ تعویض IP: {life_txt}\n"
+        f"📦 حجم: <b>{volume} GB</b>\n"
+        f"⏳ مدت: <b>{service.cfg.config_duration_days} روز</b>\n"
+        f"💵 مبلغ: <b>{price:g} {service.currency}</b>\n"
+        f"{pay_line}",
+        reply_markup=confirm_purchase_keyboard(),
+    )
+
+
+def _loc_text(data: dict) -> str:
+    parts = []
+    if data.get("area"):
+        parts.append(f"کشور {data['area']}")
+    if data.get("state"):
+        parts.append(f"استان {locations.prettify(data['state'])}")
+    if data.get("city"):
+        parts.append(f"شهر {locations.prettify(data['city'])}")
+    return " | ".join(parts) if parts else "تصادفی"
+
+
+@router.callback_query(OrderStates.confirming, F.data == "ord_confirm")
+async def order_confirm(call: CallbackQuery, state: FSMContext, service: Service, cfg: Settings, role: str) -> None:
+    data = await state.get_data()
     await state.clear()
+    await call.answer()
+    volume = int(data.get("volume", 0))
+    product = data.get("product", PRODUCT_RESIDENTIAL)
     location = ProxyLocation(
         area=data.get("area", ""),
         state=data.get("state", ""),
@@ -206,40 +285,42 @@ async def order_volume(message: Message, state: FSMContext, service: Service, cf
     )
     life = data.get("life", None)
 
-    wait = await message.answer("⏳ در حال ساخت کانفیگ... لطفاً چند لحظه صبر کنید.")
+    wait = await call.message.answer("⏳ در حال ساخت سرویس... لطفاً چند لحظه صبر کنید.")
     try:
-        result = await service.provision_config(message.from_user.id, location, volume, life=life)
+        result = await service.purchase_residential(call.from_user.id, role, location, volume, life)
+    except InsufficientBalance as exc:
+        await wait.edit_text(
+            f"⛔️ موجودی کیف پول کافی نیست.\n"
+            f"💵 مبلغ لازم: <b>{exc.needed:g} {service.currency}</b>\n"
+            f"💰 موجودی شما: <b>{exc.balance:g} {service.currency}</b>\n\n"
+            "ابتدا کیف پولتان را شارژ کنید:",
+            reply_markup=topup_after_insufficient_keyboard(),
+        )
+        return
     except ValueError as exc:
         await wait.edit_text(f"⛔️ {exc}")
         return
     except Exception as exc:  # noqa: BLE001
         logger.exception("provision failed")
-        await wait.edit_text(f"❌ خطا در ساخت کانفیگ:\n<code>{exc}</code>")
+        await wait.edit_text(f"❌ خطا در ساخت سرویس:\n<code>{exc}</code>")
         return
 
     await wait.delete()
-    await message.answer(provision_message(result))
+    await call.message.answer(provision_message(result))
 
-    # اطلاع به ادمین در صورتی که سفارش‌دهنده ادمین نباشد
-    if message.from_user.id != cfg.admin_id:
-        u = message.from_user
+    if call.from_user.id != cfg.admin_id:
+        u = call.from_user
         uname = f"@{u.username}" if u.username else (u.full_name or "—")
-        loc_txt = " | ".join(
-            p for p in [
-                f"کشور:{location.area}" if location.area else "",
-                f"استان:{location.state}" if location.state else "",
-                f"شهر:{location.city}" if location.city else "",
-            ] if p
-        ) or "تصادفی"
+        payer = service._payer_for(role)
+        pay_note = {"postpaid": "پس‌پرداخت", "wallet": "از کیف پول", "admin": "ادمین"}.get(payer, payer)
         try:
-            await message.bot.send_message(
+            await call.bot.send_message(
                 cfg.admin_id,
-                "🛒 <b>سفارش جدید ثبت شد</b>\n"
-                f"👤 نماینده: {uname} (<code>{u.id}</code>)\n"
+                "🛒 <b>سفارش جدید</b>\n"
+                f"👤 کاربر: {uname} (<code>{u.id}</code>)\n"
                 f"📦 حجم: <b>{result.volume_gb} GB</b>\n"
-                f"💵 مبلغ قابل تسویه: <b>${result.price:g}</b>\n"
-                f"🌍 لوکیشن: {loc_txt}\n"
-                f"🆔 کانفیگ: <code>#{result.config_id}</code>",
+                f"💵 مبلغ: <b>{result.price:g} {service.currency}</b> ({pay_note})\n"
+                f"🆔 سرویس: <code>#{result.config_id}</code>",
             )
         except Exception:  # noqa: BLE001
             logger.warning("notify admin failed")

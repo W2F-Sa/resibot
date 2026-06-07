@@ -1,4 +1,4 @@
-"""نقطه‌ی ورود ربات resibot."""
+"""نقطه‌ی ورود ربات w2f (Way To Freedom)."""
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +13,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from .config import ConfigError, settings
 from .database import Database
 from .handlers import register_handlers
+from .ipn import start_ipn_server
+from .middlewares import ContextMiddleware
+from .nowpayments import NowPaymentsClient
 from .panel import PanelClient
 from .service import Service
 
@@ -39,7 +42,13 @@ async def run() -> None:
         password=settings.panel_password,
     )
 
-    service = Service(settings, db, panel)
+    nowpayments = (
+        NowPaymentsClient(settings.nowpayments_api_key)
+        if settings.nowpayments_api_key
+        else None
+    )
+
+    service = Service(settings, db, panel, nowpayments=nowpayments)
     service.seed_settings()
 
     bot = Bot(
@@ -53,13 +62,27 @@ async def run() -> None:
     dp["db"] = db
     dp["service"] = service
 
+    # میدلور ثبت کاربر و تزریق نقش
+    dp.update.outer_middleware(ContextMiddleware(settings, db))
+
     register_handlers(dp, settings, db)
 
-    logger.info("resibot در حال اجرا است...")
+    ipn_runner = None
+    if settings.nowpayments_enabled:
+        try:
+            ipn_runner = await start_ipn_server(settings, db, bot)
+        except Exception:  # noqa: BLE001
+            logger.exception("راه‌اندازی سرور IPN ناموفق بود؛ شارژ خودکار غیرفعال می‌ماند")
+    else:
+        logger.info("NowPayments پیکربندی نشده؛ شارژ کیف پول غیرفعال است")
+
+    logger.info("%s در حال اجرا است...", settings.brand_name)
     try:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     finally:
+        if ipn_runner is not None:
+            await ipn_runner.cleanup()
         await panel.close()
         db.close()
         await bot.session.close()
